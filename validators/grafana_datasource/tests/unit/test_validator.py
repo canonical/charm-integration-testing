@@ -3,8 +3,9 @@
 
 import base64
 import json
+from dataclasses import dataclass
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import ops
 import pytest
@@ -43,6 +44,24 @@ VALID_DATABAG: dict[str, str] = {
     "grafana_source_data": _source_data(),
     "grafana_source_app_host": "http://prometheus.cos.svc.cluster.local:9090",
 }
+
+
+@dataclass(frozen=True)
+class AlertmanagerImplementationParams:
+    implementation: str | None
+    status_path: str
+
+
+@dataclass(frozen=True)
+class AlertmanagerResponseParams:
+    status: int
+    payload: object
+
+
+@dataclass(frozen=True)
+class RegistrationResponseParams:
+    payload: dict[str, object]
+    uid: str | None
 
 
 def _make_validator(
@@ -234,6 +253,30 @@ class TestGrafanaDatasourceValidatorSimple:
 
 
 class TestGrafanaDatasourceValidatorDeep:
+    @pytest.mark.parametrize(
+        "extra_fields",
+        [
+            pytest.param(["invalid"], id="json-array"),
+            pytest.param("invalid", id="json-string"),
+        ],
+    )
+    def test_deep_rejects_non_object_extra_fields_before_requests(self, extra_fields: object) -> None:
+        # GIVEN malformed Alertmanager metadata.
+        validator = _make_validator(
+            {
+                "grafana_source_data": _source_data(type="alertmanager", extra_fields=extra_fields),
+                "grafana_source_app_host": "http://alertmanager.cos:9093",
+            }
+        )
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN metadata validation fails before any Grafana requests or canary creation.
+        assert result.status == "FAIL"
+        assert not next(c for c in result.checks if c.name == "auth").passed
+        mock_request.assert_not_called()
+
     def test_deep_registers_queries_health_and_cleans_up_datasource(self) -> None:
         validator = _make_validator(VALID_DATABAG)
         with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
@@ -256,6 +299,131 @@ class TestGrafanaDatasourceValidatorDeep:
         assert health_call.args == ("GET", "/api/datasources/uid/canary-uid-123/health")
         assert delete_call.args == ("DELETE", "/api/datasources/uid/canary-uid-123")
 
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param(AlertmanagerImplementationParams("prometheus", "/api/v2/status"), id="prometheus"),
+            pytest.param(AlertmanagerImplementationParams("mimir", "/alertmanager/api/v2/status"), id="mimir"),
+            pytest.param(AlertmanagerImplementationParams("cortex", "/alertmanager/api/v2/status"), id="cortex"),
+            pytest.param(AlertmanagerImplementationParams(None, "/alertmanager/api/v2/status"), id="default-mimir"),
+        ],
+    )
+    def test_deep_checks_alertmanager_through_grafana_proxy(self, params: AlertmanagerImplementationParams) -> None:
+        # GIVEN an Alertmanager relation and an authenticated Grafana API.
+        extra_fields = {"implementation": params.implementation} if params.implementation else None
+        validator = _make_validator(
+            {
+                "grafana_source_data": _source_data(type="alertmanager", extra_fields=extra_fields),
+                "grafana_source_app_host": "http://alertmanager.cos:9093",
+            }
+        )
+        admin_headers = {"Authorization": "Basic dXNlcjpwYXNz"}
+        with (
+            patch("validators.grafana_datasource.validator._grafana_request") as mock_request,
+            patch(
+                "validators.grafana_datasource.validator._resolve_admin_auth_headers",
+                return_value=admin_headers,
+            ),
+        ):
+            mock_request.side_effect = [
+                (200, {"database": "ok"}),
+                (200, {"uid": "canary-uid-123"}),
+                (200, {"versionInfo": {"version": "0.31.1"}, "config": {"original": "private-config"}}),
+                (200, {"message": "Datasource deleted"}),
+            ]
+
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN Grafana proxies the status check and the canary is removed.
+        assert result.status == "PASS"
+        mock_request.assert_has_calls(
+            [
+                call(
+                    "GET",
+                    f"/api/datasources/proxy/uid/canary-uid-123{params.status_path}",
+                    headers=admin_headers,
+                ),
+                call("DELETE", "/api/datasources/uid/canary-uid-123", headers=admin_headers),
+            ]
+        )
+        health_check = next(c for c in result.checks if c.name == "datasource_health")
+        assert "0.31.1" in health_check.message
+        assert "private-config" not in health_check.message
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param(
+                AlertmanagerResponseParams(
+                    502, {"message": "private-config", "config": {"original": "private-config"}}
+                ),
+                id="upstream-unreachable",
+            ),
+            pytest.param(AlertmanagerResponseParams(401, {"message": "private-config"}), id="unauthorized"),
+            pytest.param(AlertmanagerResponseParams(403, {"message": "private-config"}), id="forbidden"),
+            pytest.param(AlertmanagerResponseParams(200, {"status": "OK"}), id="not-alertmanager-status"),
+            pytest.param(AlertmanagerResponseParams(200, {"versionInfo": {"version": ""}}), id="missing-version"),
+            pytest.param(AlertmanagerResponseParams(200, []), id="json-array"),
+            pytest.param(AlertmanagerResponseParams(200, None), id="json-null"),
+            pytest.param(AlertmanagerResponseParams(200, "OK"), id="json-string"),
+            pytest.param(AlertmanagerResponseParams(200, 1), id="json-number"),
+        ],
+    )
+    def test_deep_fails_and_cleans_up_when_alertmanager_status_is_invalid(
+        self, params: AlertmanagerResponseParams
+    ) -> None:
+        # GIVEN an Alertmanager datasource that does not return a valid status.
+        validator = _make_validator(
+            {
+                "grafana_source_data": _source_data(type="alertmanager", extra_fields={"implementation": "prometheus"}),
+                "grafana_source_app_host": "http://alertmanager.cos:9093",
+            }
+        )
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            mock_request.side_effect = [
+                (200, {"database": "ok"}),
+                (200, {"uid": "canary-uid-123"}),
+                (params.status, params.payload),
+                (200, {"message": "Datasource deleted"}),
+            ]
+
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN an unsuccessful proxy check fails validation without leaking the canary.
+        assert result.status == "FAIL"
+        health_check = next(c for c in result.checks if c.name == "datasource_health")
+        assert not health_check.passed
+        assert f"HTTP {params.status}" in health_check.message
+        assert "private-config" not in result.model_dump_json()
+        assert next(c for c in result.checks if c.name == "cleanup_datasource").passed
+
+    def test_deep_cleans_up_when_alertmanager_proxy_request_raises(self) -> None:
+        # GIVEN a transport error while checking Alertmanager through Grafana.
+        validator = _make_validator(
+            {
+                "grafana_source_data": _source_data(type="alertmanager"),
+                "grafana_source_app_host": "http://alertmanager.cos:9093",
+            }
+        )
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            mock_request.side_effect = [
+                (200, {"database": "ok"}),
+                (200, {"uid": "canary-uid-123"}),
+                ConnectionRefusedError("connection refused"),
+                (200, {"message": "Datasource deleted"}),
+            ]
+
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN the transport error is reported and the canary is removed.
+        assert result.status == "FAIL"
+        health_check = next(c for c in result.checks if c.name == "datasource_health")
+        assert "connection refused" in health_check.message
+        assert next(c for c in result.checks if c.name == "cleanup_datasource").passed
+
     def test_deep_fails_when_registration_rejected(self) -> None:
         validator = _make_validator(VALID_DATABAG)
         with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
@@ -269,13 +437,83 @@ class TestGrafanaDatasourceValidatorDeep:
         assert not register_check.passed
         assert not any(c.name == "datasource_health" for c in result.checks)
 
-    def test_deep_still_cleans_up_when_datasource_health_check_fails(self) -> None:
+    def test_deep_fails_when_registration_is_not_a_json_object(self) -> None:
+        # GIVEN a non-object response from Grafana's registration API.
+        validator = _make_validator(VALID_DATABAG)
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            mock_request.side_effect = [(200, {"database": "ok"}), (200, [])]
+
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN registration fails without attempting a health check.
+        assert result.status == "FAIL"
+        assert not next(c for c in result.checks if c.name == "register_datasource").passed
+        assert not any(c.name == "datasource_health" for c in result.checks)
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param(RegistrationResponseParams({"datasource": None}, None), id="nested-null"),
+            pytest.param(RegistrationResponseParams({"datasource": []}, None), id="nested-array"),
+            pytest.param(RegistrationResponseParams({"datasource": "invalid"}, None), id="nested-string"),
+            pytest.param(
+                RegistrationResponseParams({"datasource": {"uid": "nested-uid"}, "uid": "fallback-uid"}, "nested-uid"),
+                id="nested-uid-takes-precedence",
+            ),
+            pytest.param(RegistrationResponseParams({"uid": "fallback-uid"}, "fallback-uid"), id="top-level-uid"),
+            pytest.param(
+                RegistrationResponseParams({"datasource": None, "uid": "fallback-uid"}, "fallback-uid"),
+                id="nested-null-with-fallback",
+            ),
+            pytest.param(RegistrationResponseParams({"datasource": {"uid": 123}}, None), id="non-string-nested-uid"),
+            pytest.param(RegistrationResponseParams({"uid": 123}, None), id="non-string-top-level-uid"),
+            pytest.param(
+                RegistrationResponseParams({"datasource": {"uid": 123}, "uid": "fallback-uid"}, "fallback-uid"),
+                id="non-string-nested-uid-with-fallback",
+            ),
+        ],
+    )
+    def test_deep_validates_registration_uid_and_fallback(self, params: RegistrationResponseParams) -> None:
+        # GIVEN a registration response with a nested or top-level UID.
+        validator = _make_validator(VALID_DATABAG)
+        responses: list[tuple[int, object]] = [(200, {"database": "ok"}), (200, params.payload)]
+        if params.uid is not None:
+            responses.extend([(200, {"status": "OK"}), (200, {"message": "Datasource deleted"})])
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            mock_request.side_effect = responses
+
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN only a usable UID permits health validation and canary cleanup.
+        if params.uid is None:
+            assert result.status == "FAIL"
+            assert not next(c for c in result.checks if c.name == "register_datasource").passed
+            assert not any(c.name in {"datasource_health", "cleanup_datasource"} for c in result.checks)
+        else:
+            assert result.status == "PASS"
+            mock_request.assert_has_calls(
+                [
+                    call("GET", f"/api/datasources/uid/{params.uid}/health", headers={}),
+                    call("DELETE", f"/api/datasources/uid/{params.uid}", headers={}),
+                ]
+            )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param({"status": "ERROR", "message": "datasource unreachable"}, id="datasource-error"),
+            pytest.param([], id="json-array"),
+        ],
+    )
+    def test_deep_still_cleans_up_when_datasource_health_check_fails(self, payload: object) -> None:
         validator = _make_validator(VALID_DATABAG)
         with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
             mock_request.side_effect = [
                 (200, {"database": "ok"}),
                 (200, {"uid": "canary-uid-123"}),
-                (200, {"status": "ERROR", "message": "datasource unreachable"}),
+                (200, payload),
                 (200, {"message": "Datasource deleted"}),
             ]
             result = validator.validate(level="deep")

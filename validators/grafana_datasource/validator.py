@@ -266,7 +266,7 @@ def _validate_auth_fields(source_data: dict[str, Any]) -> tuple[ValidationCheck,
 
 def _grafana_request(
     method: str, path: str, body: dict[str, Any] | None = None, headers: dict[str, str] | None = None
-) -> tuple[int, dict[str, Any]]:
+) -> tuple[int, object]:
     """Issue an HTTP request against Grafana's local API; return (status, decoded_json_body)."""
     data = json.dumps(body).encode() if body is not None else None
     req = Request(f"{_GRAFANA_BASE_URL}{path}", data=data, method=method)  # nosec B310 - fixed local URL
@@ -330,7 +330,7 @@ def _grafana_health_check() -> ValidationCheck:
 def _deep_checks(
     source_data: dict[str, Any], url: str, auth: dict[str, Any], admin_headers: dict[str, str]
 ) -> list[ValidationCheck]:
-    """L2: register the datasource with Grafana and verify its health endpoint."""
+    """L2: register a canary datasource and check it through Grafana."""
     checks: list[ValidationCheck] = []
 
     register_check, uid = _register_datasource(source_data, url, auth, admin_headers)
@@ -339,7 +339,11 @@ def _deep_checks(
         return checks
 
     try:
-        checks.append(_datasource_health_check(uid, admin_headers))
+        if source_data["type"] == "alertmanager":
+            extra_fields = source_data.get("extra_fields") or {}
+            checks.append(_alertmanager_health_check(uid, extra_fields.get("implementation"), admin_headers))
+        else:
+            checks.append(_datasource_health_check(uid, admin_headers))
     finally:
         checks.append(_delete_datasource(uid, admin_headers))
 
@@ -374,13 +378,24 @@ def _register_datasource(
             "",
         )
 
-    uid = payload.get("datasource", {}).get("uid") or payload.get("uid", "")
-    if not uid:
+    if not isinstance(payload, dict):
+        return (
+            ValidationCheck(
+                name="register_datasource", passed=False, message="Registration response must be a JSON object."
+            ),
+            "",
+        )
+
+    datasource = payload.get("datasource")
+    uid = datasource.get("uid") if isinstance(datasource, dict) else None
+    if not isinstance(uid, str) or not uid:
+        uid = payload.get("uid")
+    if not isinstance(uid, str) or not uid:
         return (
             ValidationCheck(
                 name="register_datasource",
                 passed=False,
-                message=f"Registration response did not include a 'uid': {payload}",
+                message=f"Registration response did not include a non-empty string 'uid': {payload}",
             ),
             "",
         )
@@ -395,7 +410,7 @@ def _datasource_health_check(uid: str, admin_headers: dict[str, str]) -> Validat
     except Exception as exc:
         return ValidationCheck(name="datasource_health", passed=False, message=f"Health check failed: {exc}")
 
-    reported_status = str(payload.get("status", "")).upper()
+    reported_status = str(payload.get("status", "")).upper() if isinstance(payload, dict) else ""
     if status != 200 or reported_status != "OK":
         return ValidationCheck(
             name="datasource_health",
@@ -403,6 +418,33 @@ def _datasource_health_check(uid: str, admin_headers: dict[str, str]) -> Validat
             message=f"GET /api/datasources/uid/{uid}/health -> HTTP {status}, status={reported_status!r}: {payload}",
         )
     return ValidationCheck(name="datasource_health", passed=True, message=f"Datasource health OK: {payload}")
+
+
+def _alertmanager_health_check(uid: str, implementation: str | None, admin_headers: dict[str, str]) -> ValidationCheck:
+    """Check frontend-only Alertmanager through Grafana's datasource proxy."""
+    status_path = "/api/v2/status" if implementation == "prometheus" else "/alertmanager/api/v2/status"
+    path = f"/api/datasources/proxy/uid/{uid}{status_path}"
+    try:
+        status, payload = _grafana_request("GET", path, headers=admin_headers)
+    except Exception as exc:
+        return ValidationCheck(
+            name="datasource_health", passed=False, message=f"Alertmanager status check failed: {exc}"
+        )
+
+    if status != 200:
+        return ValidationCheck(name="datasource_health", passed=False, message=f"GET {path} -> HTTP {status}")
+
+    version_info = payload.get("versionInfo") if isinstance(payload, dict) else None
+    version = version_info.get("version") if isinstance(version_info, dict) else None
+    if not isinstance(version, str) or not version:
+        return ValidationCheck(
+            name="datasource_health",
+            passed=False,
+            message=f"GET {path} -> HTTP 200 without Alertmanager versionInfo.version",
+        )
+    return ValidationCheck(
+        name="datasource_health", passed=True, message=f"Alertmanager reachable through Grafana (version={version!r})."
+    )
 
 
 def _delete_datasource(uid: str, admin_headers: dict[str, str]) -> ValidationCheck:
