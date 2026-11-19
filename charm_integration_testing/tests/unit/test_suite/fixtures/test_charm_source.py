@@ -3,6 +3,7 @@
 
 import json
 import logging
+import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,8 @@ import pytest
 import requests
 from test_suite.fixtures import charm_source as module
 from utils.git import GitClient
+
+pytest_plugins = ["pytester"]
 
 
 @pytest.mark.parametrize(
@@ -350,3 +353,55 @@ def test_checkout_accepts_build_only_charmcraft(tmp_path: Path) -> None:
 
     # WHEN verifying the source root, THEN the legacy name identifies the charm
     module._verify_charm_root(tmp_path, "example")
+
+
+@pytest.mark.parametrize("stage", ["download", "checkout"])
+def test_source_acquisition_failure_fails_lint(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    charmlint = pytester.path / "charmlint"
+    charmlint.write_text(f"#!{sys.executable}\nraise AssertionError('must not run')\n")
+    charmlint.chmod(0o755)
+    monkeypatch.setenv("PATH", str(pytester.path))
+    monkeypatch.setenv("HOME", str(pytester.path))
+    pytester.makeconftest(
+        f"""
+        import logging
+        import zipfile
+        from types import SimpleNamespace
+        import pytest
+        from test_suite.fixtures.charm_source import target_charm_source
+
+        @pytest.fixture(scope="session")
+        def logger():
+            return logging.getLogger("test")
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            return SimpleNamespace(name="example", revision=1)
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            class JujuStub:
+                def download_charm(self, name, revision, destination):
+                    if {stage!r} == "download":
+                        raise RuntimeError("Download failed")
+                    with zipfile.ZipFile(destination, "w") as archive:
+                        archive.writestr("metadata.yaml", "name: example\\nsource: https://example.com/repo")
+                        archive.writestr("version", "abcdef0")
+            return JujuStub()
+
+        @pytest.fixture(scope="session")
+        def git_client():
+            class GitStub:
+                def checkout(self, *args):
+                    raise RuntimeError("Checkout failed")
+            return GitStub()
+        """
+    )
+    pytester.makepyfile("from test_suite.test_charmlint import test_charmlint")
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines([f"*{stage.capitalize()} failed*"])

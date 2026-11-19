@@ -7,12 +7,17 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, run  # nosec B404
 
 import pytest
+from utils.git import GitClient
 
 
 def test_charmlint(request: pytest.FixtureRequest, logger: logging.Logger) -> None:
     charmlint = shutil.which("charmlint")
     if charmlint is None:
         pytest.skip("charmlint is not installed.")
+
+    git_client: GitClient | None = request.getfixturevalue("git_client")
+    if git_client is None:
+        pytest.skip("Git is not installed.")
 
     charm_source: Path = request.getfixturevalue("target_charm_source")
     result = run(  # nosec B603
