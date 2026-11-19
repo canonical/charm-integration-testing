@@ -66,8 +66,9 @@ runs:
           | {focal: "ubuntu@20.04", jammy: "ubuntu@22.04", noble: "ubuntu@24.04"}[$series] as $base
           | [.ID, $base] | @tsv
         ' | while IFS=$'\t' read -r id base; do
+          # generate-image appends /images; bootstrap does not if its source already ends in images.
           juju metadata generate-image --base "$base" -a amd64 -i "$id" \
-            -r "$OS_REGION_NAME" -u "$OS_AUTH_URL" -d "$metadata_path"
+            -r "$OS_REGION_NAME" -u "$OS_AUTH_URL" -d "$WORKSPACE"
         done
     - name: Create Openstack cloud files
       env:
