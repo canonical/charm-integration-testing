@@ -423,7 +423,7 @@ def _alertmanager_health_check(uid: str, implementation: str | None, admin_heade
     if status != 200:
         return ValidationCheck(name="datasource_health", passed=False, message=f"GET {path} -> HTTP {status}")
 
-    version_info = payload.get("versionInfo")
+    version_info = payload.get("versionInfo") if isinstance(payload, dict) else None
     version = version_info.get("version") if isinstance(version_info, dict) else None
     if not isinstance(version, str) or not version:
         return ValidationCheck(

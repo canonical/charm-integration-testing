@@ -55,7 +55,7 @@ class AlertmanagerImplementationParams:
 @dataclass(frozen=True)
 class AlertmanagerResponseParams:
     status: int
-    payload: dict[str, object]
+    payload: object
 
 
 def _make_validator(
@@ -323,6 +323,10 @@ class TestGrafanaDatasourceValidatorDeep:
             pytest.param(AlertmanagerResponseParams(502, {"message": "Bad Gateway"}), id="upstream-unreachable"),
             pytest.param(AlertmanagerResponseParams(200, {"status": "OK"}), id="not-alertmanager-status"),
             pytest.param(AlertmanagerResponseParams(200, {"versionInfo": {"version": ""}}), id="missing-version"),
+            pytest.param(AlertmanagerResponseParams(200, []), id="json-array"),
+            pytest.param(AlertmanagerResponseParams(200, None), id="json-null"),
+            pytest.param(AlertmanagerResponseParams(200, "OK"), id="json-string"),
+            pytest.param(AlertmanagerResponseParams(200, 1), id="json-number"),
         ],
     )
     def test_deep_fails_and_cleans_up_when_alertmanager_status_is_invalid(
