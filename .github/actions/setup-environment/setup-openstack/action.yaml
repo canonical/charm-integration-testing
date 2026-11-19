@@ -61,7 +61,7 @@ runs:
         echo "path=${metadata_path}" >> "$GITHUB_OUTPUT"
         openstack image list -f json | jq -r '
           .[]
-          | select(.Status == "active" and (.Name | contains("amd64")))
+          | select(.Status == "active" and (.Name | contains("amd64")) and (.Name | test("focal|jammy|noble")))
           | (.Name | match("focal|jammy|noble").string) as $series
           | {focal: "ubuntu@20.04", jammy: "ubuntu@22.04", noble: "ubuntu@24.04"}[$series] as $base
           | [.ID, $base] | @tsv
