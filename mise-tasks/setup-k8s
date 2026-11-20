@@ -12,7 +12,7 @@ Usage: mise run setup-k8s -- [--cloud-name NAME] [--kubeconfig PATH] [--no-chaos
 
 Initialises Canonical Kubernetes with Concierge, registers it with the Juju client and installs or
 verifies Chaos Mesh. Concierge writes the kubeconfig to $HOME/.kube/config.
-This flushes the host's iptables FORWARD chain and sets its default policy to ACCEPT.
+Concierge sets the host's iptables FORWARD policy to ACCEPT.
 
 --cloud-name     Juju cloud name (default: local-k8s)
 --kubeconfig     Copy the kubeconfig to PATH and use the copy (default: use $HOME/.kube/config)
@@ -54,18 +54,8 @@ for tool in concierge juju jq mise; do
     command -v "$tool" >/dev/null || die "Missing $tool; run: mise run setup -- --group local-k8s"
 done
 
-k8s_channel="$(mise config get --file "$project_root/mise.toml" 'bootstrap.packages."snap:k8s".channel')"
-[[ -n "$k8s_channel" ]] || die "Missing Kubernetes snap channel in mise.toml"
-
-# Override Concierge's default channel: https://github.com/canonical/concierge/issues/292.
 echo "==> Preparing Canonical Kubernetes with Concierge..."
-sudo "$(command -v concierge)" prepare --config "$project_root/static/substrates/k8s.yaml" \
-    --k8s-channel "$k8s_channel" --verbose
-
-# Match Concierge's LXD firewall handling until https://github.com/canonical/concierge/issues/288.
-echo "==> Flushing the host's iptables FORWARD chain and setting its policy to ACCEPT..."
-sudo iptables -F FORWARD
-sudo iptables -P FORWARD ACCEPT
+sudo "$(command -v concierge)" prepare --config "$project_root/static/substrates/k8s.yaml" --verbose
 
 concierge_kubeconfig="$HOME/.kube/config"
 [[ -f "$concierge_kubeconfig" && -r "$concierge_kubeconfig" ]] \
