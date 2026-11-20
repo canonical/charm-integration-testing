@@ -383,51 +383,7 @@ def charmlint_pytester(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatc
 
 
 def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pytester) -> None:
-    # GIVEN a structured release-resolution failure
-    charmlint_pytester.makeconftest(
-        """
-        import logging
-        import pytest
-        from bundle_builder_x import AssumesMismatchError, ReleaseRequest
-        from test_suite.fixtures.charm_source import target_charm_source
-
-        @pytest.fixture(scope="session")
-        def logger():
-            return logging.getLogger("charmlint-resolution")
-
-        @pytest.fixture(scope="session")
-        def git_client():
-            return object()
-
-        @pytest.fixture(scope="session")
-        def target_resolved_charm():
-            raise AssumesMismatchError(
-                request=ReleaseRequest(charm_name="ceph-radosgw", juju_version="3.6.29"),
-                unmet_requirements=("feature=unsupported-openstack",),
-                available_features=("juju",),
-            )
-
-        @pytest.fixture(scope="session")
-        def juju_client():
-            pytest.fail("Juju must not be acquired for an unresolved target")
-        """
-    )
-    charmlint_pytester.makepyfile(
-        test_bundle="""
-        def test_build_bundle(target_resolved_charm):
-            pass
-        """
-    )
-
-    # WHEN both lint cases and a deployment-dependent case request the target
-    result = charmlint_pytester.runpytest("-rs")
-
-    # THEN linting skips with the cause, while bundle setup still fails
-    result.assert_outcomes(skipped=2, errors=1)
-    result.stdout.fnmatch_lines(["*Cannot resolve target charm for linting:*unsupported-openstack*"])
-
-
-def test_missing_resolved_charm_skips_charmlint(charmlint_pytester: pytest.Pytester) -> None:
+    # GIVEN an unresolved target represented by None and a separate bundle-build failure
     charmlint_pytester.makeconftest(
         """
         import logging
@@ -447,15 +403,36 @@ def test_missing_resolved_charm_skips_charmlint(charmlint_pytester: pytest.Pytes
             return None
 
         @pytest.fixture(scope="session")
+        def bundle_solution():
+            from bundle_builder_x import AssumesMismatchError, ReleaseRequest
+            raise AssumesMismatchError(
+                request=ReleaseRequest(charm_name="ceph-radosgw", juju_version="3.6.29"),
+                unmet_requirements=("feature=unsupported-openstack",),
+                available_features=("juju",),
+            )
+
+        @pytest.fixture(scope="session")
         def juju_client():
-            pytest.fail("Juju must not be acquired without a resolved target")
+            pytest.fail("Juju must not be acquired for an unresolved target")
         """
     )
+    charmlint_pytester.makepyfile(
+        test_bundle="""
+        def test_build_bundle(bundle_solution):
+            pass
+        """,
+        test_source="""
+        def test_source_is_unavailable(target_charm_source):
+            assert target_charm_source is None
+        """,
+    )
 
+    # WHEN both lint cases, source, and bundle build request their respective fixtures
     result = charmlint_pytester.runpytest("-rs")
 
-    result.assert_outcomes(skipped=2)
-    result.stdout.fnmatch_lines(["*Git or the target charm could not be resolved*"])
+    # THEN lint skips, source acquisition is unavailable, and bundle building still fails
+    result.assert_outcomes(passed=1, skipped=2, errors=1)
+    result.stdout.fnmatch_lines(["*Target charm could not be resolved for linting.*"])
 
 
 @pytest.mark.parametrize(

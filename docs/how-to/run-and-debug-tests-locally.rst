@@ -222,10 +222,12 @@ tag, or ``git describe`` version, with the charm at the repository root.
 
 Fresh runs share the synthesized target release across bundle export, lint,
 and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
-without rebuilding. Lint skips when expected constraints prevent target
-resolution or Git is unavailable; internal build errors, malformed bundles,
-source acquisition, provenance, checkout, and lint failures remain failures.
-Refresh tests skip if the saved bundle has no revision to restore.
+without rebuilding. The target resolver returns ``None`` when expected
+constraints or an unavailable Charmhub release prevent resolution. Lint skips
+when the target is unresolved or Git is unavailable; internal build errors,
+malformed bundles, unexpected Charmhub errors, source acquisition, provenance,
+checkout, and lint failures remain failures. Refresh tests skip when the saved
+bundle has no revision to restore or its target cannot be resolved.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap

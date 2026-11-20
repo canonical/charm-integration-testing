@@ -8,8 +8,6 @@ from subprocess import PIPE, STDOUT, run  # nosec B404
 
 import pytest
 
-from bundle_builder_x import CharmReleaseNotFoundException, UnsatisfiableBundleError
-
 
 def test_charmlint(request: pytest.FixtureRequest, logger: logging.Logger) -> None:
     _run_charmlint(request, logger, strict=False)
@@ -24,10 +22,9 @@ def _run_charmlint(request: pytest.FixtureRequest, logger: logging.Logger, *, st
     if charmlint is None:
         pytest.skip("charmlint is not installed.")
 
-    try:
-        request.getfixturevalue("target_resolved_charm")
-    except (UnsatisfiableBundleError, CharmReleaseNotFoundException) as exc:
-        pytest.skip(f"Cannot resolve target charm for linting: {exc}")
+    target_resolved_charm = request.getfixturevalue("target_resolved_charm")
+    if target_resolved_charm is None:
+        pytest.skip("Target charm could not be resolved for linting.")
 
     charm_source: Path | None = request.getfixturevalue("target_charm_source")
     if charm_source is None:
