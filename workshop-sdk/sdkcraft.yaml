@@ -1,0 +1,51 @@
+---
+name: charm-qa
+base: ubuntu@24.04
+adopt-info: toolkit
+title: Charm QA
+summary: Agent-neutral charm integration testing tools and skills
+description: |
+  Charm QA packages the charm-integration-testing toolkit and skills for use
+  from any project. Mise owns tool versions and snap channels; uv owns Python
+  dependencies. No coding agent, controller or local substrate is started.
+license: Apache-2.0
+source-code: https://github.com/canonical/charm-integration-testing
+issues: https://github.com/canonical/charm-integration-testing/issues
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+plugs:
+  state:
+    interface: mount
+    workshop-target: /home/workshop/.local/share/charm-qa
+    mode: 0o700
+  juju:
+    interface: mount
+    workshop-target: /home/workshop/.local/share/juju
+    mode: 0o700
+  kube:
+    interface: mount
+    workshop-target: /home/workshop/.kube
+    mode: 0o700
+  preferences:
+    interface: mount
+    workshop-target: /home/workshop/.config/charm-integration-testing
+    mode: 0o700
+  skills:
+    interface: mount
+    workshop-target: /home/workshop/.local/share/charm-integration-testing/skills
+    mode: 0o700
+parts:
+  toolkit:
+    plugin: nil
+    source: toolkit
+    override-build: |
+      mkdir -p "$CRAFT_PART_INSTALL/toolkit"
+      cp -R "$CRAFT_PART_SRC/." "$CRAFT_PART_INSTALL/toolkit/"
+      install -m 0644 "$CRAFT_PROJECT_DIR/revision" "$CRAFT_PART_INSTALL/revision"
+      craftctl set version="$(cut -c1-12 "$CRAFT_PROJECT_DIR/revision")"
+  environment:
+    plugin: dump
+    source: environment.sh
+    source-type: file

@@ -10,8 +10,8 @@ usage() {
 Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACKAGE ...]
                         [--no-packages] [--dry-run]
 
-Groups: runtime, development, workflow, integration, cleanup, sandbox, agent, local-k8s, local-lxd,
-        local-s3, cloud-k8s, cloud-openstack, cloud-lxd
+Groups: runtime, development, workflow, integration, cleanup, sandbox, workshop, agent, skills, local-k8s,
+        local-lxd, local-s3, cloud-k8s, cloud-openstack, cloud-lxd
 Tools and packages must be named exactly as declared in mise.toml.
 Groups include their tools, packages and project dependencies where applicable.
 --no-packages skips group packages; it cannot be combined with --packages.
@@ -31,6 +31,7 @@ no_packages=false
 explicit_packages=false
 dry_run=()
 project=none
+skills=false
 while (( $# )); do
     case "$1" in
         --group|--tools|--packages)
@@ -91,8 +92,18 @@ for group in "${groups[@]}"; do
                 aqua:cli/cli
             )
             ;;
+        skills)
+            skills=true
+            ;;
         sandbox)
             tools+=(go)
+            ;;
+        workshop)
+            packages+=(
+                snap:lxd
+                snap:workshop
+                snap:sdkcraft
+            )
             ;;
         integration)
             [[ "$project" == dev ]] || project=main
@@ -162,12 +173,15 @@ if (( ${#groups[@]} + ${#tools[@]} + ${#packages[@]} == 0 )); then
     die "Specify at least one group, tool or package"
 fi
 if (( ${#dry_run[@]} )); then
-    (( ${#tools[@]} == 0 && ${#packages[@]} > 0 )) ||
+    [[ "$skills" == false ]] && (( ${#tools[@]} == 0 && ${#packages[@]} > 0 )) ||
         die "--dry-run requires a package-only request"
 fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+if [[ "$skills" == true ]]; then
+    bash "$project_root/mise-tasks/setup-skills" --check
+fi
 for tool in "${tools[@]}"; do
     [[ "$tool" =~ ^[A-Za-z0-9:@+._/-]+$ ]] || die "Invalid catalogue tool name: $tool"
     mise config get --file "$project_root/mise.toml" "tools.\"$tool\"" >/dev/null ||
@@ -220,4 +234,7 @@ if [[ "$project" != none ]]; then
                 --no-default-groups --all-extras --group dev --locked
             ;;
     esac
+fi
+if [[ "$skills" == true ]]; then
+    bash "$project_root/mise-tasks/setup-skills"
 fi

@@ -12,10 +12,26 @@ available regardless of substrate.
 
 ## Setup
 
-Start the VM using the [sandbox guide](../../../development-sandbox/README.md#quick-start)
-and work from `$PROJECT_ROOT` inside it. Sandbox startup prepares the toolchain;
-rerun `scripts/sandbox.sh up` on the host if tool setup failed or its configuration
-changed.
+Run this skill inside the prepared target environment, not from an external
+host managing it. If you are outside it or it has not been prepared, stop and
+ask the user to prepare or enter it before continuing.
+
+`CHARM_QA_ROOT` identifies the toolkit checkout, which may differ from the
+charm checkout. If it is unset, ask the user to select the toolkit before
+continuing. Run tasks with `mise -C "$CHARM_QA_ROOT" run` and tools with
+`mise -C "$CHARM_QA_ROOT" exec --`. Resolve toolkit documentation from
+`$CHARM_QA_ROOT`, not the installed skill symlink.
+
+Inspect available test clouds with `mise -C "$CHARM_QA_ROOT" exec -- juju clouds --client`.
+Use only clouds and credentials explicitly provided for this test environment.
+If the required clouds already exist, skip local substrate provisioning.
+If they are missing, provision only when the user has authorized local setup
+and the environment supports it. Otherwise stop and report what is missing.
+Do not change a shared host's firewall, snaps or LXD configuration.
+
+Run the remaining examples from `$CHARM_QA_ROOT`, using absolute paths for
+workspace inputs and outputs. Preserve the environment's
+`UV_PROJECT_ENVIRONMENT` setting; it may keep dependencies outside the checkout.
 
 To reproduce another Juju client version, follow
 [persistent channel selection](../../../CONTRIBUTING.md#selecting-the-juju-client)
@@ -39,12 +55,12 @@ For an existing sandbox cluster that only needs Chaos Mesh, follow the
 
 ## Logging prerequisites
 
-Sandbox startup installs both crashdump tools for machine and Kubernetes logs.
+The `integration` setup group installs both crashdump tools for machine and Kubernetes logs.
 Keep both available even for single-substrate tests, since log collection can
 cross cloud boundaries. Their installation sources are declared in the root
 `mise.toml` and are selected by the `integration` setup group.
 The `kubectl` snap is installed only for Kubernetes or Chaos Mesh setup, not for
-LXD-only sandboxes.
+LXD-only environments.
 
 ## Running Tests After Setup
 
@@ -53,8 +69,9 @@ Kubernetes. Pass `--target-controller-bootstrap-constraints '{"root-disk":"5G"}'
 and, for a separate neighbor controller,
 `--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
 
-For Kubernetes sandbox tests, set
-`KUBECONFIG_local_k8s=$HOME/.kube/config` in the test environment.
+For Kubernetes tests, set `KUBECONFIG_<cloud>` to the provided kubeconfig path.
+For a locally provisioned `local-k8s` cloud this is normally
+`KUBECONFIG_local_k8s=$HOME/.kube/config`.
 Tests request experiments through `require_chaos_tool`, which selects a
 supporting client. Chaos Mesh CPU and memory experiments require the
 StressChaos CRD, while I/O latency requires the IOChaos CRD. If no configured
@@ -101,7 +118,7 @@ juju controllers
 This is fine. `/setup-lxd` is idempotent:
 
 ```bash
-cd "$PROJECT_ROOT" && mise run setup-lxd
+cd "$CHARM_QA_ROOT" && mise run setup-lxd
 ```
 
 ### Problem: "Cannot install juju-k8s-crashdump"
@@ -119,7 +136,7 @@ If `$HOME/.kube/config` doesn't exist:
 
 ```bash
 # Re-run K8s setup
-cd "$PROJECT_ROOT" && mise run setup-k8s
+cd "$CHARM_QA_ROOT" && mise run setup-k8s
 
 # Verify location
 ls -la "$HOME/.kube/config"

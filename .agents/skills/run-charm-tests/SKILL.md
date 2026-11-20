@@ -20,8 +20,28 @@ This skill bridges the gap between:
 ## Prerequisites
 
 Use [setup-charm-tests](../setup-charm-tests/SKILL.md) to prepare the required
-substrates and logging tools. Run commands from `$PROJECT_ROOT` inside the
-sandbox. The test suite creates controllers according to `--current-state`.
+substrates and logging tools. Run inside the prepared target environment,
+not from an external host managing it. The test suite creates controllers
+according to `--current-state`.
+
+`CHARM_QA_ROOT` identifies the toolkit checkout, which may differ from the
+charm checkout. If it is unset, ask the user to select the toolkit before
+continuing. Save the workspace path before running the examples:
+
+```bash
+workspace="$(pwd -P)"
+mise -C "$CHARM_QA_ROOT" run test:suite -- --help
+```
+
+For the examples below, run tasks with `mise -C "$CHARM_QA_ROOT" run` and
+tools with `mise -C "$CHARM_QA_ROOT" exec --`. Resolve toolkit documentation
+from `$CHARM_QA_ROOT`, not the installed skill symlink. Replace relative
+bundle, kubeconfig and output paths with absolute workspace paths such as
+`"$workspace/test-logs"`; tasks run from the toolkit, not the charm checkout.
+
+Use only clouds and credentials provided for this environment. Do not assume
+that `localhost` or `local-k8s` exists, or provision local substrates without
+authorization.
 
 ## Quick Start
 
@@ -764,7 +784,7 @@ juju ssh -m target/mymodel 0 "sudo grep -i relation /var/log/juju/unit*.log"
 1. **Start Simple**: Begin with single-cloud tests before CMR
 2. **Narrow Scope**: Run individual test modules before full suite
 3. **Preserve Models**: Use `--current-state` to skip teardown for debugging
-4. **Sandbox lifecycle**: Follow the [sandbox guide](../../../development-sandbox/README.md#quick-start); obtain approval before destroying an existing VM.
+4. **Environment boundary**: Work inside the prepared target environment; do not manage its VM or container from an external host.
 5. **Check Prerequisites**: Verify LXD/K8s available before running with `/setup-lxd` or `/setup-k8s`
 6. **Capture Output**: Logs are automatically collected into the log directory specified by `--log-dir`
 

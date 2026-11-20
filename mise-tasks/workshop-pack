@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#MISE description="Package a committed Charm QA toolkit as a Workshop SDK"
+#MISE raw_args=true
+#MISE alias="workshop:pack"
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: mise run workshop:pack -- [--try] [REF]
+
+Build the committed REF (default: HEAD), excluding local changes and untracked files.
+Write artifacts to dist/workshop; --try also installs the SDK in Workshop's try area.
+Requires SDKcraft and a configured LXD builder.
+EOF
+}
+
+operation=pack
+if [[ "${1:-}" == --try ]]; then
+    operation=try
+    shift
+fi
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    usage
+    exit 0
+fi
+if (( $# > 1 )); then
+    usage >&2
+    exit 1
+fi
+
+command -v sdkcraft >/dev/null || {
+    echo "Missing sdkcraft; run: mise run setup -- --group workshop" >&2
+    exit 1
+}
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+revision="$(git -C "$project_root" rev-parse --verify --end-of-options "${1:-HEAD}^{commit}")"
+context="$(mktemp -d)"
+trap 'rm -rf -- "$context"' EXIT
+
+# Keep local credentials, virtualenvs and untracked artifacts out of the build context.
+mkdir "$context/toolkit"
+git -C "$project_root" archive "$revision" | tar -x -C "$context/toolkit"
+sdk_source="$context/toolkit/workshop-sdk"
+cp "$sdk_source/sdkcraft.yaml" "$sdk_source/environment.sh" "$context/"
+cp -R "$sdk_source/hooks" "$context/"
+printf '%s\n' "$revision" > "$context/revision"
+
+output="$project_root/dist/workshop"
+mkdir -p "$output"
+echo "==> Packaging Charm QA from $revision (committed files only)."
+cd "$context"
+sdkcraft "$operation"
+shopt -s nullglob
+artifacts=(*.sdk)
+if (( ${#artifacts[@]} == 0 )); then
+    echo "SDKcraft produced no SDK artifacts." >&2
+    exit 1
+fi
+mv -- "${artifacts[@]}" "$output/"
