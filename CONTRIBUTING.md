@@ -27,7 +27,6 @@ the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
 
 Run `mise run setup -- --help` for supported groups and options.
 Groups compose, for example `mise run setup -- --group development integration`.
-Integration testing requires `git` on `PATH`; Mise does not install it.
 The `runtime` group installs runtime project dependencies; `development` also
 installs development extras and shared tooling, taking precedence when combined.
 
