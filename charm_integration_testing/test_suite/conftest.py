@@ -8,7 +8,7 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError  # nosec B404
 from typing import Any, Callable, Iterator
 
 import pytest
