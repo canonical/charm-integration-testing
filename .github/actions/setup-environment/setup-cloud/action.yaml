@@ -4,20 +4,12 @@ description: >
   Prepare the Juju cloud declared for an environment in static/environments.yaml
   and export its configuration to later steps as <VAR>_<cloud> variables.
   Environments that declare the same cloud share one setup within a job.
+  Supply remote cloud and S3 credentials as SETUP_CLOUD_SECRET_<secret name>
+  environment variables.
 inputs:
   environment:
     description: Environment name in static/environments.yaml.
     required: true
-  cloud-credentials:
-    description: >
-      Cloud credentials content: kubeconfig YAML for remote-k8s, novarc env file
-      for remote-o7k, credentials YAML for remote-lxd.
-    required: false
-    default: ''
-  s3-config:
-    description: S3 configuration content for the cloud, used when s3-api is requested.
-    required: false
-    default: ''
   features:
     description: JSON list of services to set up. Supported values are s3-api.
     required: false
@@ -26,6 +18,27 @@ outputs:
   cloud-name:
     description: Name of the Juju cloud, as declared in static/environments.yaml.
     value: ${{ steps.result.outputs.cloud-name }}
+  cloud-type:
+    description: Cloud setup type for the selected slot.
+    value: ${{ steps.info.outputs.cloud-type }}
+  platform:
+    description: Platform for the selected slot (kubernetes or machine).
+    value: ${{ steps.info.outputs.platform }}
+  arch:
+    description: Architecture for the selected slot.
+    value: ${{ steps.info.outputs.arch }}
+  bootstrap-config:
+    description: Path to the slot's Juju bootstrap config JSON.
+    value: ${{ steps.info.outputs.bootstrap-config }}
+  bootstrap-constraints:
+    description: Path to the slot's Juju bootstrap constraints JSON.
+    value: ${{ steps.info.outputs.bootstrap-constraints }}
+  model-config:
+    description: Path to the slot's Juju model config JSON.
+    value: ${{ steps.info.outputs.model-config }}
+  remote-logging:
+    description: Optional Loki base URL for the selected slot.
+    value: ${{ steps.info.outputs.remote-logging }}
   kubeconfig_path:
     description: Path to the kubeconfig (Kubernetes clouds only).
     value: ${{ steps.result.outputs.kubeconfig_path }}
@@ -60,6 +73,14 @@ runs:
         if [[ -f "${record}" ]]; then
           echo "found=true" >> "$GITHUB_OUTPUT"
         fi
+    - name: Report missing remote cloud credentials
+      if: ${{ steps.existing.outputs.found != 'true' && startsWith(steps.info.outputs.cloud-type, 'remote-') && env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] == '' }}
+      shell: bash
+      env:
+        CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
+      run: |
+        echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'."
+        exit 1
     - name: Create cloud workspace
       id: workspace
       if: ${{ steps.existing.outputs.found != 'true' }}
@@ -72,7 +93,7 @@ runs:
       if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'remote-k8s' }}
       uses: ./.github/actions/setup-environment/setup-k8s
       with:
-        kubeconfig: ${{ inputs.cloud-credentials }}
+        kubeconfig: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] }}
         cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup OpenStack Cloud
@@ -80,7 +101,7 @@ runs:
       if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'remote-o7k' }}
       uses: ./.github/actions/setup-environment/setup-openstack
       with:
-        novarc: ${{ inputs.cloud-credentials }}
+        novarc: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] }}
         cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup LXD Cloud
@@ -88,15 +109,15 @@ runs:
       if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'remote-lxd' }}
       uses: ./.github/actions/setup-environment/setup-lxd
       with:
-        lxd-creds: ${{ inputs.cloud-credentials }}
+        lxd-creds: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] }}
         cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Write S3 configuration
       id: s3
-      if: ${{ steps.existing.outputs.found != 'true' && contains(fromJSON(inputs.features), 's3-api') && inputs.s3-config != '' }}
+      if: ${{ steps.existing.outputs.found != 'true' && contains(fromJSON(inputs.features), 's3-api') && env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.s3-secret-name)] != '' }}
       shell: bash
       env:
-        S3_CONFIG: ${{ inputs.s3-config }}
+        S3_CONFIG: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.s3-secret-name)] }}
         WORKSPACE: ${{ steps.workspace.outputs.path }}
       run: |
         umask 077
