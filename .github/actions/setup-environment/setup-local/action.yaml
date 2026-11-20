@@ -1,0 +1,61 @@
+---
+name: Setup Local
+description: Provision a local Juju cloud, and optionally S3, on a disposable runner.
+inputs:
+  cloud-type:
+    description: Local cloud type - 'local-k8s' or 'local-lxd'.
+    required: true
+  cloud-name:
+    description: Juju cloud name declared in static/environments.yaml. LXD only supports
+      localhost.
+    required: true
+  features:
+    description: JSON list of services to set up. Supported values are s3-api.
+    required: false
+    default: '[]'
+outputs:
+  kubeconfig_path:
+    description: Path to the Kubernetes kubeconfig (local-k8s only).
+    value: ${{ steps.k8s.outputs.kubeconfig-path }}
+  s3-config-path:
+    description: Path to the S3 configuration, if requested.
+    value: ${{ steps.s3.outputs.s3-config-path }}
+runs:
+  using: composite
+  steps:
+    - name: Install tools
+      shell: bash
+      env:
+        CLOUD_TYPE: ${{ inputs.cloud-type }}
+        S3: ${{ contains(fromJSON(inputs.features), 's3-api') }}
+      run: |-
+        groups=(--group "${CLOUD_TYPE}")
+        if [[ "$S3" == true ]]; then groups+=(--group local-s3); fi
+        mise run setup -- "${groups[@]}"
+    - name: Provision Kubernetes
+      id: k8s
+      if: ${{ inputs.cloud-type == 'local-k8s' }}
+      shell: bash
+      env:
+        CLOUD_NAME: ${{ inputs.cloud-name }}
+      run: |-
+        mise run setup-k8s -- \
+          --cloud-name "$CLOUD_NAME" \
+          --kubeconfig "$RUNNER_TEMP/kubeconfig-$CLOUD_NAME.yaml" \
+          --output "$GITHUB_OUTPUT"
+    - name: Provision LXD
+      if: ${{ inputs.cloud-type == 'local-lxd' }}
+      shell: bash
+      env:
+        CLOUD_NAME: ${{ inputs.cloud-name }}
+      run: |-
+        if [[ "$CLOUD_NAME" != localhost ]]; then
+          echo "::error::Local LXD is registered by Juju as 'localhost', not '$CLOUD_NAME'."
+          exit 1
+        fi
+        mise run setup-lxd
+    - name: Provision S3
+      id: s3
+      if: ${{ contains(fromJSON(inputs.features), 's3-api') }}
+      shell: bash
+      run: mise run setup-s3 -- --output "$GITHUB_OUTPUT"

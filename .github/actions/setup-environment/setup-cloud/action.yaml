@@ -112,9 +112,17 @@ runs:
         lxd-creds: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] }}
         cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
+    - name: Setup Local Cloud
+      id: setup-local
+      if: ${{ steps.existing.outputs.found != 'true' && startsWith(steps.info.outputs.cloud-type, 'local-') }}
+      uses: ./.github/actions/setup-environment/setup-local
+      with:
+        cloud-type: ${{ steps.info.outputs.cloud-type }}
+        cloud-name: ${{ steps.info.outputs.cloud-name }}
+        features: ${{ inputs.features }}
     - name: Write S3 configuration
       id: s3
-      if: ${{ steps.existing.outputs.found != 'true' && contains(fromJSON(inputs.features), 's3-api') && env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.s3-secret-name)] != '' }}
+      if: ${{ steps.existing.outputs.found != 'true' && startsWith(steps.info.outputs.cloud-type, 'remote-') && contains(fromJSON(inputs.features), 's3-api') && env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.s3-secret-name)] != '' }}
       shell: bash
       env:
         S3_CONFIG: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.s3-secret-name)] }}
@@ -130,11 +138,11 @@ runs:
         FOUND: ${{ steps.existing.outputs.found }}
         RECORD: ${{ steps.existing.outputs.record }}
         CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
-        KUBECONFIG_PATH: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
+        KUBECONFIG_PATH: ${{ steps.setup-k8s.outputs.kubeconfig_path || steps.setup-local.outputs.kubeconfig_path }}
         CLOUD_DEFINITION_PATH: ${{ steps.setup-o7k.outputs.cloud-definition-path || steps.setup-lxd.outputs.cloud-definition-path }}
         CLOUD_CREDENTIALS_PATH: ${{ steps.setup-o7k.outputs.credentials-path || steps.setup-lxd.outputs.credentials-path }}
         METADATA_SOURCE: ${{ steps.setup-o7k.outputs.metadata-source }}
-        S3_CONFIG_PATH: ${{ steps.s3.outputs.s3-config-path }}
+        S3_CONFIG_PATH: ${{ steps.s3.outputs.s3-config-path || steps.setup-local.outputs.s3-config-path }}
       run: |-  # zizmor: ignore[github-env] values are runner-created paths and cloud names from static/environments.yaml
         if [[ "${FOUND}" != "true" ]]; then
           mkdir -p "$(dirname "${RECORD}")"
