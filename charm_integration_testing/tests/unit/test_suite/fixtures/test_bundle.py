@@ -144,6 +144,7 @@ def test_target_uses_the_exported_solution(pytester: pytest.Pytester, cmr: bool)
         """,
         test_03_restore="""
         import logging
+        from test_suite import test_downgrade_charm as downgrade_module
         from test_suite import test_upgrade_charm as module
 
         class JujuStub:
@@ -176,6 +177,19 @@ def test_target_uses_the_exported_solution(pytester: pytest.Pytester, cmr: bool)
                 target_resolved_charm_for_refresh=target_resolved_charm_for_refresh,
             )
             assert juju.refreshed["revision"] == 200
+            assert juju.refreshed["channel"] == "1/stable"
+
+        def test_downgrade_uses_bundle_release(target_resolved_charm_for_refresh, target_model_ref, neighbor_model_ref):
+            juju = JujuStub()
+            downgrade_module.test_downgrade_charm(
+                juju_client=juju,
+                target_downgrade_revision=50,
+                target_model_ref=target_model_ref,
+                neighbor_model_ref=neighbor_model_ref,
+                target_application="target",
+                target_resolved_charm_for_refresh=target_resolved_charm_for_refresh,
+            )
+            assert juju.refreshed["revision"] == 50
             assert juju.refreshed["channel"] == "1/stable"
         """,
         test_04_source="""
@@ -224,7 +238,7 @@ def test_target_uses_the_exported_solution(pytester: pytest.Pytester, cmr: bool)
     result = pytester.runpytest(*args, "-q")
 
     # THEN selection and exported deployment both use the same release, with one build
-    result.assert_outcomes(passed=5)
+    result.assert_outcomes(passed=6)
     if cmr:
         assert (pytester.path / "generated-neighbor-bundle.yaml").is_file()
 

@@ -212,40 +212,20 @@ These post-cleanup checks are outside the stress execution budget.
 Select ``-k test_live_memory_stress_moderate`` to run it.
 
 Lint the target charm's source
------------------------------
+--------------------------------
 
-``test_charmlint`` downloads the revision selected by bundle synthesis to read
-its source repository and build-generated ``version`` file, then runs charmlint against
-a detached Git checkout instead of the extracted charm, so source-only files
-such as unit tests are included. Charmlint retains its default policy: errors
-fail; warnings do not. A separate ``test_charmlint_strict`` case uses
-``--strict`` and fails on warnings as well as errors. Both cases log the full
-charmlint output and share the same source checkout.
+``test_charmlint`` checks out the source revision recorded in the selected
+Charmhub charm, so source-only files are included. The default case fails on
+errors; ``test_charmlint_strict`` also fails on warnings. Both log full output.
+The archive must provide a public HTTPS source repository and a clean commit,
+tag, or ``git describe`` version, with the charm at the repository root.
 
-Bundle synthesis is shared with ``test_build_bundle``; linting and the
-downgrade/upgrade cycle use the target release from that same solution, even
-when the solver chooses a different release from the configured default.
-When resuming beyond ``no_bundle``, the target is read from the existing
-``--target-bundle`` instead, without rebuilding it. Charmhub resolves the
-target using any revision, channel, and base recorded in its entry, plus the
-requested platform and Juju client version. Without a recorded revision,
-linting can use a different release from the one already deployed. The
-downgrade/upgrade cycle skips rather than risk restoring the wrong revision.
-
-If bundle synthesis or a saved bundle lookup cannot resolve the target release,
-both lint cases skip with the resolution error as the reason.
-Bundle building and deployment retain their existing failure behavior.
-Internal solver/build errors, Charmhub connection errors, malformed saved bundles,
-download failures, missing provenance, and checkout failures still fail linting.
-
-The archive must declare one public HTTPS source repository and a clean commit,
-tag, or ``git describe`` version. Missing or unavailable provenance fails the
-test; it does not fall back to the packed charm or a default branch. The source
-checkout must have the target charm at its root. Non-GitHub revisions are
-fetched directly first; only unresolved abbreviated revisions require scanning
-advertised refs, with blob filtering where supported by the Git server.
-The lint test skips if Git is not installed; source download and checkout errors
-otherwise fail the test.
+Fresh runs share the synthesized target release across bundle export, lint,
+and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
+without rebuilding. Lint skips when expected constraints prevent target
+resolution or Git is unavailable; internal build errors, malformed bundles,
+source acquisition, provenance, checkout, and lint failures remain failures.
+Refresh tests skip if the saved bundle has no revision to restore.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap

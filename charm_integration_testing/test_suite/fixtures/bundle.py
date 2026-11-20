@@ -117,23 +117,23 @@ def bundle_solution(
     return bundle_builder.build(spec)
 
 
-class _SavedTargetApplication(BaseModel):
+class _TargetCharmSelectors(BaseModel):
     charm: str
     channel: CharmChannel | None = None
     revision: int | None = Field(default=None, strict=True, ge=0)
     base: str | None = Field(default=None, pattern=r"^ubuntu@\d+\.\d+$")
 
 
-class _SavedBundle(BaseModel):
+class _BundleDocument(BaseModel):
     applications: dict[str, object]
 
 
 @pytest.fixture(scope="session")
-def saved_target_application(target_bundle: Path, target_application: str) -> _SavedTargetApplication:
-    """Read the target's release selectors without validating unrelated applications."""
+def target_bundle_charm_selectors(target_bundle: Path, target_application: str) -> _TargetCharmSelectors:
+    """Read the target's Charmhub selectors without validating unrelated applications."""
     documents = yaml.safe_load_all(target_bundle.read_text(encoding="utf-8"))
-    saved = _SavedBundle.model_validate(next(documents, None))
-    return _SavedTargetApplication.model_validate(saved.applications[target_application])
+    bundle = _BundleDocument.model_validate(next(documents, None))
+    return _TargetCharmSelectors.model_validate(bundle.applications[target_application])
 
 
 @pytest.fixture(scope="session")
@@ -152,7 +152,7 @@ def target_resolved_charm(
                 return bundle.applications[target_application].charm
         raise ValueError(f"Generated solution has no bundle for model {model_key!r}.")
 
-    application: _SavedTargetApplication = request.getfixturevalue("saved_target_application")
+    application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
     channel = application.channel
     client: CharmhubClient = request.getfixturevalue("charmhub_client")
     arch: str = request.getfixturevalue("target_arch")
@@ -175,7 +175,7 @@ def target_resolved_charm(
 def target_resolved_charm_for_refresh(request: pytest.FixtureRequest) -> Charm:
     """Require a recorded original revision before starting or resuming a refresh cycle."""
     if State(request.config.getoption("--current-state")) != State.NO_BUNDLE:
-        application: _SavedTargetApplication = request.getfixturevalue("saved_target_application")
+        application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
         if application.revision is None:
             pytest.skip("The saved bundle has no target revision to restore after downgrade.")
     target: Charm = request.getfixturevalue("target_resolved_charm")
