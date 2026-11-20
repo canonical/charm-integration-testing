@@ -877,6 +877,7 @@ class JubilantBackend(JujuBackend):
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         is_k8s = self.is_k8s_model(model)
         # Machine SCP needs -r for directories; Kubernetes copies directories without it.
+        # https://github.com/juju/juju/blob/048d091e7672ab54c4b4090f7181220cf381b579/cmd/juju/ssh/ssh_container.go#L299-L305
         options: tuple[str, ...] = () if is_k8s else ("--", "-r")
         # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
         if is_k8s and self.cli_version() >= JujuVersion(4, 1):
