@@ -212,7 +212,7 @@ These post-cleanup checks are outside the stress execution budget.
 Select ``-k test_live_memory_stress_moderate`` to run it.
 
 Lint the target charm's source
------------------------------
+--------------------------------
 
 ``test_charmlint`` downloads the revision selected by bundle synthesis to read
 its source repository and build-generated ``version`` file, then runs charmlint against
