@@ -14,11 +14,11 @@ outputs:
     description: Architecture string (e.g. amd64).
     value: ${{ steps.lookup.outputs.arch }}
   cloud-type:
-    description: Cloud setup type (k8s, o7k, or lxd).
+    description: Cloud setup type (remote-k8s, remote-o7k, or remote-lxd).
     value: ${{ steps.lookup.outputs.cloud-type }}
   credentials-secret:
     description: Name of the GitHub Actions secret holding the cloud credentials (kubeconfig
-      for k8s, novarc for o7k, LXD credentials YAML for lxd).
+      for remote-k8s, novarc for remote-o7k, LXD credentials YAML for remote-lxd).
     value: ${{ steps.lookup.outputs.credentials-secret }}
   s3-secret-name:
     description: Optional name of the GitHub Actions secret holding the shared S3
@@ -41,7 +41,7 @@ outputs:
   metadata-source:
     description: >
       Path to the local directory containing Juju simplestreams image metadata.
-      Set for OpenStack (o7k) environments; empty for k8s environments.
+      Set for OpenStack (remote-o7k) environments; empty otherwise.
     value: ${{ steps.lookup.outputs.metadata-source }}
 runs:
   using: composite
@@ -62,9 +62,9 @@ runs:
         arch=$(yq ".environments[\"${ENVIRONMENT_NAME}\"].arch" "${table}")
         cloud_type=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"cloud-type\"]" "${table}")
         case "${cloud_type}" in
-          k8s) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}") ;;
-          o7k) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}") ;;
-          lxd) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"lxd-secret\"] // \"\"" "${table}") ;;
+          remote-k8s) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}") ;;
+          remote-o7k) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}") ;;
+          remote-lxd) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"lxd-secret\"] // \"\"" "${table}") ;;
           *)
             echo "::error::Unsupported cloud type '${cloud_type}' for environment '${ENVIRONMENT_NAME}'."
             exit 1
@@ -91,7 +91,7 @@ runs:
         echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
         echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"
         echo "remote-logging=${remote_logging}" >> "${GITHUB_OUTPUT}"
-        if [[ "${cloud_type}" == "o7k" ]]; then
+        if [[ "${cloud_type}" == "remote-o7k" ]]; then
           echo "metadata-source=${HOME}/openstack/images" >> "${GITHUB_OUTPUT}"
         else
           echo "metadata-source=" >> "${GITHUB_OUTPUT}"
