@@ -2080,7 +2080,7 @@ class TestJubilantBackend:
             assert stub.command == "ls -l"
             assert stub.options == params.options
             assert stub.timeout == timeout
-            assert result == ("output" if timeout is not None else None)
+            assert result == "output"
 
     class TestExecUnit:
         @staticmethod

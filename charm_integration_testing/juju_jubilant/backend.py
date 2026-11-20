@@ -903,11 +903,11 @@ class JubilantBackend(JujuBackend):
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
     ) -> str | None:
-        """Run SSH, returning its output when a timeout is provided."""
+        """Run SSH and return its output."""
         # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
         options = ("--direct",) if self.is_k8s_model(model) and self.cli_version() >= JujuVersion(4, 1) else ()
         stdout, _ = self.client.model(model)._cli("ssh", *options, application, command, timeout=timeout)
-        return stdout if timeout is not None else None
+        return stdout
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
         application, unit_id = unit.split("/")
