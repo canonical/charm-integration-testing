@@ -1,71 +1,137 @@
 ---
 name: Setup Cloud
 description: >
-  Set up a Juju cloud (K8s, OpenStack, or LXD), delegating to the appropriate
-  setup action based on cloud type.
+  Prepare the Juju cloud declared for an environment in static/environments.yaml
+  and export its configuration to later steps as <VAR>_<cloud> variables.
+  Environments that declare the same cloud share one setup within a job.
 inputs:
-  cloud-name:
-    description: Name to register the Juju cloud under.
-    required: true
-  cloud-type:
-    description: Cloud type - 'remote-k8s', 'remote-o7k', or 'remote-lxd'.
+  environment:
+    description: Environment name in static/environments.yaml.
     required: true
   cloud-credentials:
     description: >
-      Cloud credentials content. The expected format depends on cloud-type:
-      kubeconfig YAML for remote-k8s, novarc env file for remote-o7k, credentials
-      YAML for remote-lxd.
+      Cloud credentials content: kubeconfig YAML for remote-k8s, novarc env file
+      for remote-o7k, credentials YAML for remote-lxd.
     required: false
     default: ''
+  s3-config:
+    description: S3 configuration content for the cloud, used when s3-api is requested.
+    required: false
+    default: ''
+  features:
+    description: JSON list of services to set up. Supported values are s3-api.
+    required: false
+    default: '[]'
 outputs:
   cloud-name:
-    description: Name of the Juju cloud registered on this runner.
-    value: ${{ inputs.cloud-name }}
+    description: Name of the Juju cloud, as declared in static/environments.yaml.
+    value: ${{ steps.result.outputs.cloud-name }}
   kubeconfig_path:
-    description: Path to the kubeconfig file written to disk (k8s only; empty string
-      for o7k/lxd).
-    value: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
+    description: Path to the kubeconfig (Kubernetes clouds only).
+    value: ${{ steps.result.outputs.kubeconfig_path }}
   cloud-definition-path:
-    description: Path to the cloud definition YAML file written to disk (o7k/lxd;
-      empty string for k8s).
-    value: ${{ steps.setup-o7k.outputs.cloud-definition-path || steps.setup-lxd.outputs.cloud-definition-path }}
+    description: Path to the Juju cloud definition (non-Kubernetes clouds only).
+    value: ${{ steps.result.outputs.cloud-definition-path }}
   credentials-path:
-    description: Path to the credentials YAML file written to disk (o7k/lxd; empty
-      string for k8s).
-    value: ${{ steps.setup-o7k.outputs.credentials-path || steps.setup-lxd.outputs.credentials-path }}
+    description: Path to the Juju credentials (non-Kubernetes clouds only).
+    value: ${{ steps.result.outputs.credentials-path }}
   metadata-source:
-    description: Path to image metadata (o7k only; empty string for k8s).
-    value: ${{ steps.setup-o7k.outputs.metadata-source }}
+    description: Path to image metadata (remote-o7k only).
+    value: ${{ steps.result.outputs.metadata-source }}
+  s3-config-path:
+    description: Path to the S3 configuration, when s3-api is requested and available.
+    value: ${{ steps.result.outputs.s3-config-path }}
 runs:
   using: composite
   steps:
+    - name: Look up environment
+      id: info
+      uses: ./.github/actions/get-environment-info
+      with:
+        environment_name: ${{ inputs.environment }}
+    - name: Check for an existing setup
+      id: existing
+      shell: bash
+      env:
+        CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
+      run: |
+        record="${RUNNER_TEMP}/juju-clouds/${CLOUD_NAME}.outputs"
+        echo "record=${record}" >> "$GITHUB_OUTPUT"
+        if [[ -f "${record}" ]]; then
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        fi
     - name: Create cloud workspace
       id: workspace
+      if: ${{ steps.existing.outputs.found != 'true' }}
       shell: bash
       run: |
         workspace="$(mktemp -d "${RUNNER_TEMP}/juju-cloud.XXXXXX")"
         echo "path=${workspace}" >> "$GITHUB_OUTPUT"
     - name: Setup K8s Cloud
       id: setup-k8s
-      if: ${{ inputs.cloud-type == 'remote-k8s' }}
+      if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'remote-k8s' }}
       uses: ./.github/actions/setup-environment/setup-k8s
       with:
         kubeconfig: ${{ inputs.cloud-credentials }}
-        cloud-name: ${{ inputs.cloud-name }}
+        cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup OpenStack Cloud
       id: setup-o7k
-      if: ${{ inputs.cloud-type == 'remote-o7k' }}
+      if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'remote-o7k' }}
       uses: ./.github/actions/setup-environment/setup-openstack
       with:
         novarc: ${{ inputs.cloud-credentials }}
-        cloud-name: ${{ inputs.cloud-name }}
+        cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup LXD Cloud
       id: setup-lxd
-      if: ${{ inputs.cloud-type == 'remote-lxd' }}
+      if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'remote-lxd' }}
       uses: ./.github/actions/setup-environment/setup-lxd
       with:
         lxd-creds: ${{ inputs.cloud-credentials }}
-        cloud-name: ${{ inputs.cloud-name }}
+        cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
+    - name: Write S3 configuration
+      id: s3
+      if: ${{ steps.existing.outputs.found != 'true' && contains(fromJSON(inputs.features), 's3-api') && inputs.s3-config != '' }}
+      shell: bash
+      env:
+        S3_CONFIG: ${{ inputs.s3-config }}
+        WORKSPACE: ${{ steps.workspace.outputs.path }}
+      run: |
+        umask 077
+        printf '%s' "${S3_CONFIG}" > "${WORKSPACE}/s3.conf"
+        echo "s3-config-path=${WORKSPACE}/s3.conf" >> "$GITHUB_OUTPUT"
+    - name: Export cloud configuration
+      id: result
+      shell: bash
+      env:
+        FOUND: ${{ steps.existing.outputs.found }}
+        RECORD: ${{ steps.existing.outputs.record }}
+        CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
+        KUBECONFIG_PATH: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
+        CLOUD_DEFINITION_PATH: ${{ steps.setup-o7k.outputs.cloud-definition-path || steps.setup-lxd.outputs.cloud-definition-path }}
+        CLOUD_CREDENTIALS_PATH: ${{ steps.setup-o7k.outputs.credentials-path || steps.setup-lxd.outputs.credentials-path }}
+        METADATA_SOURCE: ${{ steps.setup-o7k.outputs.metadata-source }}
+        S3_CONFIG_PATH: ${{ steps.s3.outputs.s3-config-path }}
+      run: |-  # zizmor: ignore[github-env] values are runner-created paths and cloud names from static/environments.yaml
+        if [[ "${FOUND}" != "true" ]]; then
+          mkdir -p "$(dirname "${RECORD}")"
+          {
+            echo "cloud-name=${CLOUD_NAME}"
+            echo "kubeconfig_path=${KUBECONFIG_PATH}"
+            echo "cloud-definition-path=${CLOUD_DEFINITION_PATH}"
+            echo "credentials-path=${CLOUD_CREDENTIALS_PATH}"
+            echo "metadata-source=${METADATA_SOURCE}"
+            echo "s3-config-path=${S3_CONFIG_PATH}"
+          } > "${RECORD}"
+          suffix="${CLOUD_NAME//-/_}"
+          export_path() {
+            if [[ -n "$2" ]]; then echo "$1_${suffix}=$2" >> "$GITHUB_ENV"; fi
+          }
+          export_path KUBECONFIG "${KUBECONFIG_PATH}"
+          export_path CLOUD_DEFINITION "${CLOUD_DEFINITION_PATH}"
+          export_path CLOUD_CREDENTIALS "${CLOUD_CREDENTIALS_PATH}"
+          export_path S3_CONFIG "${S3_CONFIG_PATH}"
+        fi
+        cat "${RECORD}" >> "$GITHUB_OUTPUT"
