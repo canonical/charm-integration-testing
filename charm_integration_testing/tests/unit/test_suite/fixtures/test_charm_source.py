@@ -375,87 +375,101 @@ def test_checkout_accepts_build_only_charmcraft(tmp_path: Path) -> None:
     module._verify_charm_root(tmp_path, "example")
 
 
-@pytest.mark.parametrize(
-    ("charm_available", "git_available"),
-    [(True, False), (False, True)],
-    ids=["missing-git", "unresolved-target"],
-)
-def test_unavailable_source_prerequisite_returns_none(
-    pytester: pytest.Pytester, charm_available: bool, git_available: bool
-) -> None:
-    pytester.makeconftest(
-        f"""
+@pytest.fixture
+def charmlint_pytester(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> pytest.Pytester:
+    executable = pytester.path / "charmlint"
+    executable.write_text(f"#!{sys.executable}\nraise AssertionError('charmlint must not run')\n")
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(pytester.path))
+    monkeypatch.setenv("HOME", str(pytester.path))
+    pytester.makepyfile(test_lint="from test_suite.test_charmlint import test_charmlint, test_charmlint_strict")
+    return pytester
+
+
+def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pytester) -> None:
+    # GIVEN an unresolved target represented by None and a separate bundle-build failure
+    charmlint_pytester.makeconftest(
+        """
         import logging
-        from types import SimpleNamespace
         import pytest
         from test_suite.fixtures.charm_source import target_charm_source
 
         @pytest.fixture(scope="session")
         def logger():
-            return logging.getLogger("test")
-
-        @pytest.fixture(scope="session")
-        def target_resolved_charm():
-            if not {charm_available!r}:
-                return None
-            return SimpleNamespace(name="example", revision=1)
-
-        @pytest.fixture(scope="session")
-        def juju_client():
-            return object()
+            return logging.getLogger("charmlint-resolution")
 
         @pytest.fixture(scope="session")
         def git_client():
-            return object() if {git_available!r} else None
+            return object()
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            return None
+
+        @pytest.fixture(scope="session")
+        def bundle_solution():
+            from bundle_builder_x import AssumesMismatchError, ReleaseRequest
+            raise AssumesMismatchError(
+                request=ReleaseRequest(charm_name="ceph-radosgw", juju_version="3.6.29"),
+                unmet_requirements=("feature=unsupported-openstack",),
+                available_features=("juju",),
+            )
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            pytest.fail("Juju must not be acquired for an unresolved target")
         """
     )
-    pytester.makepyfile(
-        test_missing_git="""
-        def test_source_fixture_returns_none(target_charm_source):
+    charmlint_pytester.makepyfile(
+        test_bundle="""
+        def test_build_bundle(bundle_solution):
+            pass
+        """,
+        test_source="""
+        def test_source_is_unavailable(target_charm_source):
             assert target_charm_source is None
-        """
+        """,
     )
 
-    result = pytester.runpytest()
+    # WHEN both lint cases, source, and bundle build request their respective fixtures
+    result = charmlint_pytester.runpytest("-rs")
 
-    result.assert_outcomes(passed=1)
+    # THEN lint skips, source acquisition is unavailable, and bundle building still fails
+    result.assert_outcomes(passed=1, skipped=2, errors=1)
+    result.stdout.fnmatch_lines(["*Target charm could not be resolved for linting.*"])
 
 
-@pytest.mark.parametrize("stage", ["download", "checkout"])
-def test_source_acquisition_failure_fails_lint(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, stage: str
-) -> None:
-    charmlint = pytester.path / "charmlint"
-    charmlint.write_text(f"#!{sys.executable}\nraise AssertionError('must not run')\n")
-    charmlint.chmod(0o755)
-    monkeypatch.setenv("PATH", str(pytester.path))
-    monkeypatch.setenv("HOME", str(pytester.path))
-    pytester.makeconftest(
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [
+        pytest.param("resolution", "Charmhub unavailable", id="connection"),
+        pytest.param("invalid-bundle", "Invalid saved bundle", id="invalid-bundle"),
+        pytest.param("download", "Download failed", id="download"),
+        pytest.param("provenance", "Packed charm has no version file", id="provenance"),
+        pytest.param("checkout", "Checkout failed", id="checkout"),
+        pytest.param("solver-timeout", "Solver timed out", id="solver-timeout"),
+        pytest.param("optimization", "Optimization failed", id="optimization"),
+        pytest.param("mixed-diagnostics", "Solver timed out", id="mixed-diagnostics"),
+    ],
+)
+def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stage: str, message: str) -> None:
+    # GIVEN a failure other than an expected target-resolution incompatibility
+    charmlint_pytester.makeconftest(
         f"""
         import logging
         import zipfile
         from types import SimpleNamespace
         import pytest
+        import requests
+        from bundle_builder_x import (
+            ApplicationReleaseDiagnostic, BundleBuildFailureDiagnostic,
+            BundleBuildFailureKind, CharmReleaseNotFoundException, UncompletableBundleError,
+        )
         from test_suite.fixtures.charm_source import target_charm_source
 
         @pytest.fixture(scope="session")
         def logger():
-            return logging.getLogger("test")
-
-        @pytest.fixture(scope="session")
-        def target_resolved_charm():
-            return SimpleNamespace(name="example", revision=1)
-
-        @pytest.fixture(scope="session")
-        def juju_client():
-            class JujuStub:
-                def download_charm(self, name, revision, destination):
-                    if {stage!r} == "download":
-                        raise RuntimeError("Download failed")
-                    with zipfile.ZipFile(destination, "w") as archive:
-                        archive.writestr("metadata.yaml", "name: example\\nsource: https://example.com/repo")
-                        archive.writestr("version", "abcdef0")
-            return JujuStub()
+            return logging.getLogger("charmlint-resolution")
 
         @pytest.fixture(scope="session")
         def git_client():
@@ -463,11 +477,47 @@ def test_source_acquisition_failure_fails_lint(
                 def checkout(self, *args):
                     raise RuntimeError("Checkout failed")
             return GitStub()
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            if {stage!r} == "resolution":
+                raise requests.HTTPError("Charmhub unavailable")
+            if {stage!r} == "invalid-bundle":
+                raise ValueError("Invalid saved bundle")
+            if {stage!r} in ("solver-timeout", "optimization", "mixed-diagnostics"):
+                kind = (
+                    BundleBuildFailureKind.OPTIMIZATION_UNSATISFIABLE
+                    if {stage!r} == "optimization"
+                    else BundleBuildFailureKind.SOLVER_TIMEOUT
+                )
+                diagnostics = [BundleBuildFailureDiagnostic(kind=kind, detail={message!r})]
+                if {stage!r} == "mixed-diagnostics":
+                    diagnostics.append(ApplicationReleaseDiagnostic(
+                        application="target", charm_name="example", model="model",
+                        error=CharmReleaseNotFoundException("Missing release"),
+                    ))
+                raise UncompletableBundleError(diagnostics)
+            return SimpleNamespace(name="example", revision=1)
+
+        class JujuStub:
+            def download_charm(self, name, revision, destination):
+                if {stage!r} == "download":
+                    raise CharmReleaseNotFoundException("Download failed")
+                with zipfile.ZipFile(destination, "w") as archive:
+                    archive.writestr("metadata.yaml", "name: example\\nsource: https://example.com/repo")
+                    if {stage!r} == "checkout":
+                        archive.writestr("version", "abcdef0")
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            return JujuStub()
         """
     )
-    pytester.makepyfile("from test_suite.test_charmlint import test_charmlint")
 
-    result = pytester.runpytest()
+    # WHEN acquiring the source through both real test cases
+    result = charmlint_pytester.runpytest()
 
-    result.assert_outcomes(failed=1)
-    result.stdout.fnmatch_lines([f"*{stage.capitalize()} failed*"])
+    # THEN errors other than target resolution are not converted to skips
+    result.assert_outcomes(failed=2)
+    result.stdout.fnmatch_lines([f"*{message}*"])
+    assert "charmlint must not run" not in result.stdout.str()

@@ -105,15 +105,20 @@ def _verify_charm_root(source_dir: Path, expected_name: str) -> None:
 
 @pytest.fixture(scope="session")
 def target_charm_source(
-    target_resolved_charm: Charm | None,
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     logger: logging.Logger,
     git_client: GitClient | None,
 ) -> Iterator[Path | None]:
     """Check out the source revision recorded in the target charm's packed version file."""
-    if target_resolved_charm is None or git_client is None:
+    if git_client is None:
         yield None
         return
+    target_resolved_charm: Charm | None = request.getfixturevalue("target_resolved_charm")
+    if target_resolved_charm is None:
+        yield None
+        return
+
+    juju_client: JujuClient = request.getfixturevalue("juju_client")
     # Juju's snap cannot write to pytest's hidden /tmp paths.
     with tempfile.TemporaryDirectory(prefix="cit-target-charm-", dir=Path.home()) as cache_dir:
         cache_path = Path(cache_dir)
