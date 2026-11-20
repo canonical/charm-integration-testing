@@ -22,6 +22,10 @@ def _run_charmlint(request: pytest.FixtureRequest, logger: logging.Logger, *, st
     if charmlint is None:
         pytest.skip("charmlint is not installed.")
 
+    target_resolved_charm = request.getfixturevalue("target_resolved_charm")
+    if target_resolved_charm is None:
+        pytest.skip("Target charm could not be resolved for linting.")
+
     charm_source: Path | None = request.getfixturevalue("target_charm_source")
     if charm_source is None:
         pytest.skip("Git or the target charm could not be resolved for linting.")

@@ -220,13 +220,8 @@ errors; ``test_charmlint_strict`` also fails on warnings. Both log full output.
 
 Fresh runs share the synthesized target release across bundle export, lint,
 and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
-without rebuilding.
-
-If bundle synthesis or a saved bundle lookup cannot resolve the target release,
-both lint cases skip with the resolution error as the reason.
-Bundle building and deployment retain their existing failure behavior.
-Internal solver/build errors, Charmhub connection errors, malformed saved bundles,
-download failures, missing provenance, and checkout failures still fail linting.
+without rebuilding. The target resolver returns ``None`` when expected
+constraints or an unavailable Charmhub release prevent resolution.
 
 The archive must declare one public HTTPS source repository and a clean commit,
 tag, or ``git describe`` version. Missing or unavailable provenance fails the
@@ -237,10 +232,11 @@ advertised refs, with blob filtering where supported by the Git server.
 The source fixture returns ``None`` if Git or the target release cannot be
 resolved, and the lint test decides to skip; source download and checkout errors
 otherwise fail the test.
+The refresh fixture returns ``None`` when the target or saved revision cannot be
+resolved, and the consuming refresh tests decide to skip.
 
-The refresh fixture returns ``None`` when the target or saved revision is
-unavailable, and the consuming refresh tests decide to skip. Malformed bundles,
-missing provenance, download, checkout, and lint failures remain failures.
+Internal build errors, malformed bundles, unexpected Charmhub errors, missing
+provenance, source download, checkout, and lint failures remain failures.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap
