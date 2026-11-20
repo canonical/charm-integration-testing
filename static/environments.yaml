@@ -136,3 +136,27 @@ environments:
   ps7-sqa-prod_charm_qa_lxd-8: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-9: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-10: *ps7-sqa-prod_charm_qa_lxd
+  # GitHub-hosted runner environments
+  github-runner-k8s: &github-runner-k8s
+    github-runner: github-hosted-k8s
+    platform: kubernetes
+    cloud-type: local-k8s
+    cloud: local-k8s
+    features: [s3-api]
+    arch: amd64
+  github-runner-k8s-2: *github-runner-k8s
+  github-runner-k8s-3: *github-runner-k8s
+  github-runner-k8s-4: *github-runner-k8s
+  github-runner-k8s-5: *github-runner-k8s
+  github-runner-lxd: &github-runner-lxd
+    github-runner: github-hosted-lxd
+    platform: machine
+    cloud-type: local-lxd
+    # Juju's built-in name for the local LXD cloud.
+    cloud: localhost
+    features: [s3-api]
+    arch: amd64
+  github-runner-lxd-2: *github-runner-lxd
+  github-runner-lxd-3: *github-runner-lxd
+  github-runner-lxd-4: *github-runner-lxd
+  github-runner-lxd-5: *github-runner-lxd

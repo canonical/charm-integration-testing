@@ -14,7 +14,8 @@ outputs:
     description: Architecture string (e.g. amd64).
     value: ${{ steps.lookup.outputs.arch }}
   cloud-type:
-    description: Cloud setup type (remote-k8s, remote-o7k, or remote-lxd).
+    description: Cloud setup type (remote-k8s, remote-o7k, remote-lxd, local-k8s,
+      or local-lxd).
     value: ${{ steps.lookup.outputs.cloud-type }}
   cloud-name:
     description: Juju cloud name shared by every environment on the same cloud.
@@ -68,6 +69,7 @@ runs:
           remote-k8s) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}") ;;
           remote-o7k) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}") ;;
           remote-lxd) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"lxd-secret\"] // \"\"" "${table}") ;;
+          local-k8s|local-lxd) credentials_secret="" ;;
           *)
             echo "::error::Unsupported cloud type '${cloud_type}' for environment '${ENVIRONMENT_NAME}'."
             exit 1

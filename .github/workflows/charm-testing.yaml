@@ -100,17 +100,35 @@ on:
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
 jobs:
-  # NOTE: determine-runner and execute-charm-test were temporarily merged into a single
-  # job because only ps7 runners are in use, and running two jobs per workflow wastes a
-  # second runner slot for no benefit. To revert once more runner types are back in play,
-  # restore the separate `determine-runner` job (see git history) and change `runs-on`
-  # below back to `${{ fromJSON(needs.determine-runner.outputs.runner) }}` with
-  # `needs: determine-runner`, and change the `steps.pick.outputs.*` references
-  # throughout this job back to `needs.determine-runner.outputs.*`.
+  determine-runner:
+    name: Determine GitHub Actions runner to use for the environment
+    runs-on: ubuntu-24.04
+    outputs:
+      runner: ${{ steps.pick.outputs.runner-labels }}
+      debug-mode: ${{ steps.pick.outputs.debug-mode }}
+      pip-proxy: ${{ steps.pick.outputs.pip-proxy }}
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Pick runner
+        id: pick
+        uses: ./.github/actions/pick-runner
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          neighbor_environment: ${{ inputs.neighbor_environment }}
+      - name: Trigger rerun on Test Observer if failure
+        if: ${{ failure() && inputs.execution_id != '' && ((inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API != '') || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API != '')) }}
+        uses: ./.github/actions/test-observer/trigger-rerun
+        with:
+          test_observer_api: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || vars.STG_TEST_OBSERVER_API }}
+          test_observer_token: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || secrets.STG_TEST_OBSERVER_TOKEN }}
+          test_execution_id: ${{ inputs.execution_id }}
   execute-charm-test:
     name: Execute integration tests against the charms
-    # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
-    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
+    needs: determine-runner
+    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
@@ -128,12 +146,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Pick runner
-        id: pick
-        uses: ./.github/actions/pick-runner
-        with:
-          target_environment: ${{ inputs.target_environment }}
-          neighbor_environment: ${{ inputs.neighbor_environment }}
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
@@ -141,9 +153,9 @@ jobs:
           # Remove once 4/stable serves stable 4.1: https://github.com/canonical/charm-integration-testing/issues/1309
           juju-channel: ${{ inputs.juju_channel == '4/stable' && '4.1/edge' || inputs.juju_channel }}
         env:
-          HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
+          HTTPS_PROXY: ${{ needs.determine-runner.outputs.pip-proxy }}
       - name: Enable Debug Session
-        if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
@@ -154,14 +166,6 @@ jobs:
           ssh-import-id ${SSH_IDS} || true
           echo "Debug mode enabled. SSH connection details:"
           echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
-      - name: Create swap file
-        shell: bash
-        run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo swapon --show
       - name: Log job inputs
         shell: bash
         env:
@@ -282,13 +286,13 @@ jobs:
           event_name: setup_neighbor_failed
           detail: Setup of neighbor cloud failed.
       - name: Debug Setup
-        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
         run: sleep ${DEBUG_SLEEP_SECONDS}
       - name: Debug Setup
-        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
@@ -500,7 +504,7 @@ jobs:
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
       - name: Post Logs To Swift
         id: post_logs_to_swift
-        if: ${{ !cancelled() && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && inputs.execution_id != '' && startsWith(steps.setup_target.outputs.cloud-type, 'remote-') }}
         uses: ./.github/actions/swift/upload
         with:
           job_uuid: ${{ inputs.test_observer_environment }}/${{ inputs.execution_id
@@ -514,8 +518,16 @@ jobs:
           SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME_PS7 }}
           SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME_PS7 }}
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME_PS7 }}
+      - name: Upload local runner logs
+        id: upload_local_logs
+        if: ${{ !cancelled() && startsWith(steps.setup_target.outputs.cloud-type, 'local-') && steps.collect_logs.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: charm-test-logs
+          path: ${{ steps.collect_logs.outputs.directory_path }}
+          if-no-files-found: error
       - name: Post 'log_collection_finished' event
-        if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && (steps.post_logs_to_swift.outcome == 'success' || steps.upload_local_logs.outcome == 'success') && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
@@ -524,13 +536,13 @@ jobs:
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
         run: sleep ${DEBUG_SLEEP_SECONDS}
       - name: Debug Post Log Collection
-        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
@@ -558,6 +570,10 @@ jobs:
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
           status: COMPLETED
+      - name: Fail local runner job if tests failed
+        if: ${{ always() && !cancelled() && startsWith(steps.setup_target.outputs.cloud-type, 'local-') && (steps.run_tests.outcome == 'failure' || steps.run_tests_cmr.outcome == 'failure') }}
+        shell: bash
+        run: exit 1
       - name: Trigger rerun on Test Observer if failure
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/trigger-rerun
