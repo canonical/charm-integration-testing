@@ -18,13 +18,10 @@ def test_upgrade_charm(
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
-    target_channel: str | None,
-    target_resolved_charm: Charm,
+    target_resolved_charm_for_refresh: Charm,
 ) -> None:
-    # The resolved charm carries the concrete revision and channel even in a "latest release" run,
-    # where --target-revision/--target-channel are left at their defaults.
-    target_revision = target_resolved_charm.revision
-    resolved_target_channel = target_channel or str(target_resolved_charm.channel)
+    target_revision = target_resolved_charm_for_refresh.revision
+    resolved_target_channel = str(target_resolved_charm_for_refresh.channel)
 
     # Upgrading the charm to the target revision specified by the fixture
     juju_client.logger.info(
