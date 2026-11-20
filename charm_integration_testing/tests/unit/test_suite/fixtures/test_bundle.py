@@ -392,28 +392,83 @@ def test_resumed_run_uses_saved_target_selectors(
     assert bundle.read_text() == original
 
 
-def test_unavailable_pinned_revision_returns_none(pytester: pytest.Pytester) -> None:
-    # GIVEN a resumed bundle pinned to a revision that Charmhub cannot resolve
+def test_unavailable_saved_release_returns_none_for_refresh(pytester: pytest.Pytester) -> None:
+    # GIVEN a saved bundle whose pinned revision is absent from Charmhub
     bundle = pytester.path / "saved.yaml"
     bundle.write_text("applications:\n  target:\n    charm: nrpe\n    revision: 999\n")
-    pytester.makeconftest(
-        _FIXTURES
-        + _CATALOG
-        + dedent("""
-        @pytest.fixture(scope="session")
-        def bundle_solution():
-            pytest.fail("A resumed run must not synthesize a replacement bundle")
-        """)
-    )
+    pytester.makeconftest(_FIXTURES + _CATALOG)
     pytester.makepyfile(
         """
-        def test_unavailable_release_is_not_resolved(target_resolved_charm, target_resolved_charm_for_refresh):
+        def test_target_resolution_returns_none(target_resolved_charm):
             assert target_resolved_charm is None
+
+        def test_refresh_requires_resolved_target(target_resolved_charm_for_refresh):
             assert target_resolved_charm_for_refresh is None
         """
     )
 
-    # WHEN resolving the saved target, THEN the fixtures expose unavailability to their consumers
+    # WHEN resuming with the unavailable revision
+    result = pytester.runpytest(
+        "--current-state",
+        "deployed",
+        "--target-controller",
+        "existing",
+        "--target-model",
+        "existing",
+        "--target-application",
+        "target",
+        "--target-platform",
+        "machine",
+        "--target-bundle",
+        str(bundle),
+        "-q",
+        "-rs",
+    )
+
+    # THEN resolution returns None without making the test case skip
+    result.assert_outcomes(passed=2)
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["direct-response", "nested-response"])
+def test_unexpected_charmhub_response_remains_an_error(pytester: pytest.Pytester, nested: bool) -> None:
+    # GIVEN a saved bundle whose Charmhub lookup receives an unexpected store response
+    bundle = pytester.path / "saved.yaml"
+    bundle.write_text("applications:\n  target:\n    charm: nrpe\n    revision: 100\n")
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + dedent(f"""
+        from bundle_builder_x import ReleaseRequest, ReleaseUnavailableError, ReleaseUnavailableKind
+
+        @pytest.fixture(scope="session")
+        def charmhub_client():
+            class UnexpectedResponse:
+                def charm_from_store(self, **kwargs):
+                    request = ReleaseRequest(charm_name="nrpe")
+                    unexpected = ReleaseUnavailableError(
+                        kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+                        request=request,
+                        detail="Synthetic malformed store response",
+                    )
+                    if {nested!r}:
+                        raise ReleaseUnavailableError(
+                            kind=ReleaseUnavailableKind.TRACK_NOT_FOUND,
+                            request=request,
+                            detail="Synthetic track lookup failure",
+                            causes=(unexpected,),
+                        )
+                    raise unexpected
+            return UnexpectedResponse()
+        """)
+    )
+    pytester.makepyfile(
+        """
+        def test_target_resolution(target_resolved_charm):
+            pass
+        """
+    )
+
+    # WHEN resolving the pinned release
     result = pytester.runpytest(
         "--current-state",
         "deployed",
@@ -430,7 +485,84 @@ def test_unavailable_pinned_revision_returns_none(pytester: pytest.Pytester) -> 
         "-q",
     )
 
-    result.assert_outcomes(passed=1)
+    # THEN the unexpected store response propagates instead of returning None
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*ReleaseUnavailableError*"])
+
+
+def test_unexpected_store_response_in_solver_diagnostics_remains_an_error(pytester: pytest.Pytester) -> None:
+    # GIVEN a fresh bundle synthesis with a nested unexpected Charmhub error
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + dedent("""
+        from bundle_builder_x import (
+            ApplicationReleaseDiagnostic,
+            ReleaseRequest,
+            ReleaseUnavailableError,
+            ReleaseUnavailableKind,
+            UnsatisfiableBundleError,
+        )
+
+        @pytest.fixture(scope="session")
+        def bundle_solution():
+            request = ReleaseRequest(charm_name="nrpe")
+            unexpected = ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+                request=request,
+                detail="Synthetic malformed store response",
+            )
+            wrapped = ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.TRACK_NOT_FOUND,
+                request=request,
+                detail="Synthetic track lookup failure",
+                causes=(unexpected,),
+            )
+            raise UnsatisfiableBundleError(
+                diagnostics=(
+                    ApplicationReleaseDiagnostic(
+                        application="target",
+                        charm_name="nrpe",
+                        model="controller/model",
+                        error=wrapped,
+                    ),
+                ),
+            )
+        """)
+    )
+    pytester.makepyfile(
+        """
+        def test_target_resolution(target_resolved_charm):
+            pass
+        """
+    )
+
+    # WHEN resolving the lint target, THEN the unexpected error remains a failure
+    result = pytester.runpytest(
+        "--target-charm",
+        "nrpe",
+        "--target-application",
+        "target",
+        "--target-endpoint",
+        "general-info",
+        "--neighbor-charm",
+        "ubuntu",
+        "--neighbor-application",
+        "neighbor",
+        "--neighbor-endpoint",
+        "juju-info",
+        "--target-platform",
+        "machine",
+        "--current-state",
+        "no_bundle",
+        "--prefix",
+        "bundle-test",
+        "--mermaid-output",
+        str(pytester.path / "bundle.mmd"),
+        "-q",
+    )
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*UnsatisfiableBundleError*"])
 
 
 def test_target_downgrade_uses_compatible_historical_revision(pytester: pytest.Pytester) -> None:
@@ -596,15 +728,15 @@ def test_failed_synthesis_is_shared_and_reported_by_build_test(pytester: pytest.
     pytester.makeconftest(_FIXTURES + _CATALOG)
     pytester.makepyfile(
         test_00_selection="""
-        import pytest
-        from bundle_builder_x import UnsatisfiableBundleError
-
-        def test_target_cannot_resolve(request):
-            with pytest.raises(UnsatisfiableBundleError):
-                request.getfixturevalue("target_resolved_charm")
+        def test_target_cannot_resolve(target_resolved_charm):
+            assert target_resolved_charm is None
         """,
         test_01_export="from test_suite.test_build_bundle import test_build_bundle",
-        test_02_verify="""
+        test_02_refresh="""
+        def test_refresh_skips_for_unresolved_target(target_resolved_charm_for_refresh):
+            assert target_resolved_charm_for_refresh is None
+        """,
+        test_03_verify="""
         def test_only_one_attempt(bundle_builder):
             assert bundle_builder.builds == 1
         """,
@@ -639,13 +771,67 @@ def test_failed_synthesis_is_shared_and_reported_by_build_test(pytester: pytest.
         "-q",
     )
 
-    # THEN the build keeps its call-phase failure and does not retry synthesis
-    result.assert_outcomes(passed=2, failed=1)
+    # THEN resolution returns None, refresh can inspect it, and the build keeps its failure
+    result.assert_outcomes(passed=3, failed=1)
     build = next(case for case in ElementTree.parse(junit).iter("testcase") if case.get("name") == "test_build_bundle")
     failure = build.find("failure")
     assert failure is not None
     assert "UnsatisfiableBundleError" in failure.get("message", "")
     assert build.find("error") is None
+
+
+def test_internal_synthesis_failure_is_not_converted_to_none(pytester: pytest.Pytester) -> None:
+    # GIVEN an internal bundle-builder failure
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + dedent("""
+        from bundle_builder_x import BundleBuildFailureDiagnostic, BundleBuildFailureKind, UncompletableBundleError
+
+        @pytest.fixture(scope="session")
+        def bundle_solution():
+            diagnostic = BundleBuildFailureDiagnostic(
+                kind=BundleBuildFailureKind.SOLVER_TIMEOUT,
+                detail="Synthetic solver timeout",
+            )
+            raise UncompletableBundleError([diagnostic])
+        """)
+    )
+    pytester.makepyfile(
+        """
+        def test_target_resolution(target_resolved_charm):
+            pass
+        """
+    )
+
+    # WHEN resolving the target
+    result = pytester.runpytest(
+        "--target-charm",
+        "nrpe",
+        "--target-application",
+        "target",
+        "--target-endpoint",
+        "general-info",
+        "--neighbor-charm",
+        "ubuntu",
+        "--neighbor-application",
+        "neighbor",
+        "--neighbor-endpoint",
+        "juju-info",
+        "--target-platform",
+        "machine",
+        "--current-state",
+        "no_bundle",
+        "--prefix",
+        "bundle-test",
+        "--mermaid-output",
+        str(pytester.path / "bundle.mmd"),
+        "-q",
+    )
+
+    # THEN the internal error propagates instead of becoming None
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*UncompletableBundleError*Synthetic solver timeout*"])
 
 
 @pytest.mark.parametrize("lint_before_build", [True, False], ids=["lint-first", "build-first"])
@@ -714,9 +900,7 @@ def test_failed_synthesis_skips_only_charmlint(
     for name in ("test_charmlint", "test_charmlint_strict"):
         skipped = cases[name].find("skipped")
         assert skipped is not None
-        assert "Cannot resolve target charm for linting:" in skipped.get("message", "")
-        assert "Could not build a complete valid bundle:" in skipped.get("message", "")
-        assert "No matching synthetic release" in skipped.get("message", "")
+        assert "Target charm could not be resolved for linting." in skipped.get("message", "")
     failure = cases["test_build_bundle"].find("failure")
     assert failure is not None
     assert "UnsatisfiableBundleError" in failure.get("message", "")
