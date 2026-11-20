@@ -166,14 +166,6 @@ jobs:
           ssh-import-id ${SSH_IDS} || true
           echo "Debug mode enabled. SSH connection details:"
           echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
-      - name: Create swap file
-        shell: bash
-        run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo swapon --show
       - name: Log job inputs
         shell: bash
         env:
