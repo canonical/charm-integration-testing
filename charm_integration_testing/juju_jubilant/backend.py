@@ -876,6 +876,7 @@ class JubilantBackend(JujuBackend):
 
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         is_k8s = self.is_k8s_model(model)
+        # Machine SCP needs -r for directories; Kubernetes copies directories without it.
         options: tuple[str, ...] = () if is_k8s else ("--", "-r")
         # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
         if is_k8s and self.cli_version() >= JujuVersion(4, 1):
@@ -901,15 +902,11 @@ class JubilantBackend(JujuBackend):
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
     ) -> str | None:
-        """Run SSH, optionally bounding the entire process and returning its output."""
+        """Run SSH, returning its output when a timeout is provided."""
         # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
         options = ("--direct",) if self.is_k8s_model(model) and self.cli_version() >= JujuVersion(4, 1) else ()
-        juju = self.client.model(model)
-        if timeout is None:
-            juju.cli("ssh", *options, application, command)
-            return None
-        stdout, _ = juju._cli("ssh", *options, application, command, timeout=timeout)
-        return stdout
+        stdout, _ = self.client.model(model)._cli("ssh", *options, application, command, timeout=timeout)
+        return stdout if timeout is not None else None
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
         application, unit_id = unit.split("/")

@@ -2043,13 +2043,10 @@ class TestJubilantBackend:
             def version(self) -> str:
                 return self.version_str
 
-            def cli(self, *args: str) -> None:
+            def _cli(self, *args: str, timeout: float | None = None) -> tuple[str, str]:
                 assert args[0] == "ssh"
                 self.options = tuple(args[1:-2])
                 self.target, self.command = args[-2:]
-
-            def _cli(self, *args: str, timeout: float) -> tuple[str, str]:
-                self.cli(*args)
                 self.timeout = timeout
                 return "output", ""
 
