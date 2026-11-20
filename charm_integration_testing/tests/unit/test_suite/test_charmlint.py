@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 from subprocess import CalledProcessError
+from types import SimpleNamespace
 
 import pytest
 from test_suite import test_charmlint as module
@@ -25,6 +26,11 @@ def target_charm_source(tmp_path: Path) -> Path:
     return source
 
 
+@pytest.fixture
+def target_resolved_charm() -> SimpleNamespace:
+    return SimpleNamespace(name="example", revision=1)
+
+
 @pytest.mark.parametrize("strict", [False, True], ids=["default", "strict"])
 @pytest.mark.parametrize("exit_code", [0, 1, 2], ids=["passed", "error", "warnings-or-runtime-error"])
 def test_charmlint_logs_output(
@@ -32,7 +38,6 @@ def test_charmlint_logs_output(
     exit_code: int,
     tmp_path: Path,
     target_charm_source: Path,
-    git_client: GitClient,
     request: pytest.FixtureRequest,
     logger: logging.Logger,
     caplog: pytest.LogCaptureFixture,
@@ -78,6 +83,7 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
         import logging
         import pytest
         from test_suite.conftest import git_client, record_pipeline_version_execution_metadata
+        from test_suite.fixtures.charm_source import target_charm_source
 
         @pytest.fixture(scope="session")
         def logger():
@@ -91,14 +97,18 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
         def record_metadata(record_pipeline_version_execution_metadata):
             pass
 
-        @pytest.fixture
-        def target_charm_source():
-            pytest.fail("Source must not be acquired without Git")
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            return {"name": "example", "revision": 1}
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            pytest.fail("Charm must not be downloaded without Git")
         """
     )
     pytester.makepyfile(
         """
-        from test_suite.test_charmlint import test_charmlint
+        from test_suite.test_charmlint import test_charmlint, test_charmlint_strict
 
         def test_unrelated():
             pass
@@ -107,8 +117,8 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
 
     result = pytester.runpytest("-rs")
 
-    result.assert_outcomes(passed=1, skipped=1)
-    result.stdout.fnmatch_lines(["*Git is not installed*"])
+    result.assert_outcomes(passed=1, skipped=2)
+    result.stdout.fnmatch_lines(["*Git or the target charm could not be resolved*"])
 
 
 def test_pipeline_metadata_skips_describe_when_git_log_fails(pytester: pytest.Pytester) -> None:

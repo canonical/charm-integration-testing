@@ -14,10 +14,12 @@ from bundle_builder_x import (
     Charm,
     CharmChannel,
     CharmhubClient,
+    CharmReleaseNotFoundException,
     IntegrationSpec,
     ModelSpec,
     Solution,
     SpecFile,
+    UnsatisfiableBundleError,
 )
 from bundle_builder_x import (
     JujuVersion as BundleJujuVersion,
@@ -142,33 +144,36 @@ def target_resolved_charm(
     target_application: str,
     target_controller: str,
     model: str,
-) -> Charm:
-    """Resolve the target from the synthesized solution or saved bundle selectors."""
-    if State(request.config.getoption("--current-state")) == State.NO_BUNDLE:
-        solution: Solution = request.getfixturevalue("bundle_solution")
-        model_key = f"{target_controller}/{model}"
-        for bundle in solution.bundles:
-            if bundle.model == model_key:
-                return bundle.applications[target_application].charm
-        raise ValueError(f"Generated solution has no bundle for model {model_key!r}.")
+) -> Charm | None:
+    """Resolve the target, returning None when expected release constraints cannot be met."""
+    try:
+        if State(request.config.getoption("--current-state")) == State.NO_BUNDLE:
+            solution: Solution = request.getfixturevalue("bundle_solution")
+            model_key = f"{target_controller}/{model}"
+            for bundle in solution.bundles:
+                if bundle.model == model_key:
+                    return bundle.applications[target_application].charm
+            raise ValueError(f"Generated solution has no bundle for model {model_key!r}.")
 
-    application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
-    channel = application.channel
-    client: CharmhubClient = request.getfixturevalue("charmhub_client")
-    arch: str = request.getfixturevalue("target_arch")
-    platform: str = request.getfixturevalue("target_platform")
-    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
-    return client.charm_from_store(
-        charm_name=application.charm,
-        ubuntu_arch=arch,
-        platform=platform,
-        juju_version=BundleJujuVersion.parse(str(juju_cli_version)),
-        charm_track=channel.track if channel is not None else None,
-        charm_risk=channel.risk if channel is not None else None,
-        charm_branch=(channel.branch or None) if channel is not None else None,
-        charm_revision=application.revision,
-        ubuntu_version=application.base.removeprefix("ubuntu@") if application.base is not None else None,
-    )
+        application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
+        channel = application.channel
+        client: CharmhubClient = request.getfixturevalue("charmhub_client")
+        arch: str = request.getfixturevalue("target_arch")
+        platform: str = request.getfixturevalue("target_platform")
+        juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
+        return client.charm_from_store(
+            charm_name=application.charm,
+            ubuntu_arch=arch,
+            platform=platform,
+            juju_version=BundleJujuVersion.parse(str(juju_cli_version)),
+            charm_track=channel.track if channel is not None else None,
+            charm_risk=channel.risk if channel is not None else None,
+            charm_branch=(channel.branch or None) if channel is not None else None,
+            charm_revision=application.revision,
+            ubuntu_version=application.base.removeprefix("ubuntu@") if application.base is not None else None,
+        )
+    except (UnsatisfiableBundleError, CharmReleaseNotFoundException):
+        return None
 
 
 @pytest.fixture(scope="session")
@@ -178,5 +183,7 @@ def target_resolved_charm_for_refresh(request: pytest.FixtureRequest) -> Charm:
         application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
         if application.revision is None:
             pytest.skip("The saved bundle has no target revision to restore after downgrade.")
-    target: Charm = request.getfixturevalue("target_resolved_charm")
+    target: Charm | None = request.getfixturevalue("target_resolved_charm")
+    if target is None:
+        pytest.skip("The target charm could not be resolved for the refresh cycle.")
     return target
