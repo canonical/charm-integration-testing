@@ -8,12 +8,13 @@ inputs:
     description: Name to register the Juju cloud under.
     required: true
   cloud-type:
-    description: Cloud type - either 'k8s', 'o7k', or 'lxd'.
+    description: Cloud type - 'remote-k8s', 'remote-o7k', or 'remote-lxd'.
     required: true
   cloud-credentials:
     description: >
       Cloud credentials content. The expected format depends on cloud-type:
-      kubeconfig YAML for k8s, novarc env file for o7k, credentials YAML for lxd.
+      kubeconfig YAML for remote-k8s, novarc env file for remote-o7k, credentials
+      YAML for remote-lxd.
     required: false
     default: ''
 outputs:
@@ -46,7 +47,7 @@ runs:
         echo "path=${workspace}" >> "$GITHUB_OUTPUT"
     - name: Setup K8s Cloud
       id: setup-k8s
-      if: ${{ inputs.cloud-type == 'k8s' }}
+      if: ${{ inputs.cloud-type == 'remote-k8s' }}
       uses: ./.github/actions/setup-environment/setup-k8s
       with:
         kubeconfig: ${{ inputs.cloud-credentials }}
@@ -54,7 +55,7 @@ runs:
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup OpenStack Cloud
       id: setup-o7k
-      if: ${{ inputs.cloud-type == 'o7k' }}
+      if: ${{ inputs.cloud-type == 'remote-o7k' }}
       uses: ./.github/actions/setup-environment/setup-openstack
       with:
         novarc: ${{ inputs.cloud-credentials }}
@@ -62,7 +63,7 @@ runs:
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup LXD Cloud
       id: setup-lxd
-      if: ${{ inputs.cloud-type == 'lxd' }}
+      if: ${{ inputs.cloud-type == 'remote-lxd' }}
       uses: ./.github/actions/setup-environment/setup-lxd
       with:
         lxd-creds: ${{ inputs.cloud-credentials }}
