@@ -152,7 +152,7 @@ class JubilantClientStub(JubilantClient):
     def __init__(self, client: Any) -> None:
         self.client = client
 
-    def model(self, model: JujuModelHandle | None, *, timeout: float | None = None) -> Any:
+    def model(self, model: JujuModelHandle | None) -> Any:
         return self.client
 
 
@@ -346,7 +346,7 @@ class ModelLookupClientStub(JubilantClient):
         self.models = models
         self.lookups: list[str] = []
 
-    def model(self, model: JujuModelHandle | None, *, timeout: float | None = None) -> Any:
+    def model(self, model: JujuModelHandle | None) -> Any:
         assert model is not None
         self.lookups.append(model.uri)
         return self.models[model.uri]
@@ -1031,7 +1031,7 @@ class TestJubilantBackend:
             )
 
             class TwoModelClientStub(JubilantClient):
-                def model(self, model: JujuModelHandle | None, *, timeout: float | None = None) -> Any:
+                def model(self, model: JujuModelHandle | None) -> Any:
                     model_name = model.model if isinstance(model, JujuModelHandle) else model
                     if model_name == "model-1":
                         return stub_1
@@ -2553,7 +2553,7 @@ class TestJubilantBackend:
                 self._status = status
                 self._cli_error = cli_error
 
-            def model(self, model: JujuModelHandle | None, *, timeout: float | None = None) -> Any:
+            def model(self, model: JujuModelHandle | None) -> Any:
                 assert model is not None
                 self.requested_models.append(model)
                 self.requested_uris.append(model.uri)
@@ -3364,7 +3364,7 @@ class TestJubilantBackendModelArchitecture:
         stub = self.ConstraintsStub(constraints)
 
         class Client(JubilantClientStub):
-            def model(self, requested: JujuModelHandle | None, *, timeout: float | None = None) -> Any:
+            def model(self, requested: JujuModelHandle | None) -> Any:
                 assert requested == model
                 return self.client
 
@@ -3439,7 +3439,7 @@ class TestJubilantBackendCliVersion:
         version_stub = self.VersionStub()
 
         class TrackingClient(JubilantClientStub):
-            def model(self, model: JujuModelHandle | None, *, timeout: float | None = None) -> Any:
+            def model(self, model: JujuModelHandle | None) -> Any:
                 requested_models.append(model)
                 return version_stub
 
@@ -3463,7 +3463,7 @@ class TestJubilantBackendDebugLog:
                 return f"this is a debug log for model {self.model}"
 
         class DebugClient(JubilantClientStub):
-            def model(self, model: JujuModelHandle | Any, *, timeout: float | None = None) -> Any:
+            def model(self, model: JujuModelHandle | Any) -> Any:
                 return ModelStub(model=model)
 
         client = DebugClient(client=None)
@@ -4009,10 +4009,8 @@ SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner
 
 
 class MachineSshBackend(JubilantBackend):
-    def _ssh_options(
-        self, model: JujuModelHandle, *, recursive: bool = False, timeout: float | None = None
-    ) -> tuple[str, ...]:
-        return ()
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return False
 
 
 @pytest.mark.parametrize(

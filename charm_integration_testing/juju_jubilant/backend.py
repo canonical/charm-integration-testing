@@ -874,20 +874,12 @@ class JubilantBackend(JujuBackend):
             stderr=task_result.results.stderr,
         )
 
-    def _ssh_options(
-        self, model: JujuModelHandle, *, recursive: bool = False, timeout: float | None = None
-    ) -> tuple[str, ...]:
-        juju = self.client.model(model, timeout=timeout)
-        if juju.show_model().type != "kubernetes":
-            return ("--", "-r") if recursive else ()
-        # Preserve Kubernetes exec/copy: https://github.com/juju/juju/issues/23899
-        version = JujuVersion.parse(str(juju.version()).strip())
-        return ("--direct",) if version >= JujuVersion(4, 1) else ()
-
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
-        # Jubilant scp doesn't work for directories
-        # https://github.com/canonical/jubilant/issues/266
-        options = self._ssh_options(model, recursive=True)
+        is_k8s = self.is_k8s_model(model)
+        options: tuple[str, ...] = () if is_k8s else ("--", "-r")
+        # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
+        if is_k8s and self.cli_version() >= JujuVersion(4, 1):
+            options = ("--direct",)
 
         # The Juju snap can only access files under $HOME.  Stage any source
         # that lives outside the home directory into a temporary directory
@@ -910,7 +902,8 @@ class JubilantBackend(JujuBackend):
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
     ) -> str | None:
         """Run SSH, optionally bounding the entire process and returning its output."""
-        options = self._ssh_options(model, timeout=timeout)
+        # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
+        options = ("--direct",) if self.is_k8s_model(model) and self.cli_version() >= JujuVersion(4, 1) else ()
         juju = self.client.model(model)
         if timeout is None:
             juju.cli("ssh", *options, application, command)

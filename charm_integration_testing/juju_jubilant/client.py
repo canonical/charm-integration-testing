@@ -38,12 +38,10 @@ class JubilantClient:
             raise ValueError("Command timeout must be positive.")
         self.command_timeout = command_timeout
 
-    def model(self, model: JujuModelHandle | None, *, timeout: float | None = None) -> jubilant.Juju:
+    def model(self, model: JujuModelHandle | None) -> jubilant.Juju:
         client = _BoundedJuju(
             model=model.uri if model is not None else None,
             wait_timeout=timedelta(days=1).total_seconds(),
         )
         client.command_timeout = self.command_timeout.total_seconds()
-        if timeout is not None:
-            client.command_timeout = min(timeout, client.command_timeout)
         return client
