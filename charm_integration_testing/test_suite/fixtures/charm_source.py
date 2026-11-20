@@ -16,7 +16,7 @@ from juju import JujuClient
 from pydantic import BaseModel, Field
 from utils.git import GitClient
 
-from bundle_builder_x import Charm, CharmReleaseNotFoundException, UnsatisfiableBundleError
+from bundle_builder_x import Charm
 
 
 class _Links(BaseModel):
@@ -106,14 +106,15 @@ def target_charm_source(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
     git_client: GitClient | None,
-) -> Iterator[Path]:
+) -> Iterator[Path | None]:
     """Check out the source revision recorded in the target charm's packed version file."""
     if git_client is None:
-        pytest.skip("Git is not installed.")
-    try:
-        target_resolved_charm: Charm = request.getfixturevalue("target_resolved_charm")
-    except (UnsatisfiableBundleError, CharmReleaseNotFoundException) as exc:
-        pytest.skip(f"Cannot resolve target charm for linting: {exc}")
+        yield None
+        return
+    target_resolved_charm: Charm | None = request.getfixturevalue("target_resolved_charm")
+    if target_resolved_charm is None:
+        yield None
+        return
 
     juju_client: JujuClient = request.getfixturevalue("juju_client")
     # Juju's snap cannot write to pytest's hidden /tmp paths.

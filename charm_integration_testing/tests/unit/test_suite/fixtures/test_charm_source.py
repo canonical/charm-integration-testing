@@ -427,6 +427,37 @@ def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pyt
     result.stdout.fnmatch_lines(["*Cannot resolve target charm for linting:*unsupported-openstack*"])
 
 
+def test_missing_resolved_charm_skips_charmlint(charmlint_pytester: pytest.Pytester) -> None:
+    charmlint_pytester.makeconftest(
+        """
+        import logging
+        import pytest
+        from test_suite.fixtures.charm_source import target_charm_source
+
+        @pytest.fixture(scope="session")
+        def logger():
+            return logging.getLogger("charmlint-resolution")
+
+        @pytest.fixture(scope="session")
+        def git_client():
+            return object()
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            return None
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            pytest.fail("Juju must not be acquired without a resolved target")
+        """
+    )
+
+    result = charmlint_pytester.runpytest("-rs")
+
+    result.assert_outcomes(skipped=2)
+    result.stdout.fnmatch_lines(["*Git or the target charm could not be resolved*"])
+
+
 @pytest.mark.parametrize(
     ("stage", "message"),
     [
