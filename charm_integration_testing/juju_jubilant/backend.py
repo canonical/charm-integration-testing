@@ -875,12 +875,13 @@ class JubilantBackend(JujuBackend):
         )
 
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
-        # Jubilant scp doesn't work for directories
-        # https://github.com/canonical/jubilant/issues/266
-        #
-        # Furthermore, machine charms need to specify -r if source is a directory
-        #   we'll always specify -r to be safe
-        options = () if self.is_k8s_model(model) else ("--", "-r")
+        is_k8s = self.is_k8s_model(model)
+        # Machine SCP needs -r for directories; Kubernetes copies directories without it.
+        # https://github.com/juju/juju/blob/048d091e7672ab54c4b4090f7181220cf381b579/cmd/juju/ssh/ssh_container.go#L299-L305
+        options: tuple[str, ...] = () if is_k8s else ("--", "-r")
+        # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
+        if is_k8s and self.cli_version() >= JujuVersion(4, 1):
+            options = ("--direct",)
 
         # The Juju snap can only access files under $HOME.  Stage any source
         # that lives outside the home directory into a temporary directory
@@ -902,12 +903,10 @@ class JubilantBackend(JujuBackend):
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
     ) -> str | None:
-        """Run SSH, optionally bounding the entire process and returning its output."""
-        juju = self.client.model(model)
-        if timeout is None:
-            juju.ssh(target=application, command=command)
-            return None
-        stdout, _ = juju._cli("ssh", application, command, timeout=timeout)
+        """Run SSH and return its output."""
+        # Jubilant cannot pass Juju's --direct flag: https://github.com/juju/juju/issues/23899
+        options = ("--direct",) if self.is_k8s_model(model) and self.cli_version() >= JujuVersion(4, 1) else ()
+        stdout, _ = self.client.model(model)._cli("ssh", *options, application, command, timeout=timeout)
         return stdout
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
