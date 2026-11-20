@@ -1,10 +1,14 @@
 ---
 environments:
+  # Each entry is a scheduler slot. Slots that share a `cloud` share one Juju cloud
+  # registration; `features` lists the services the slot can provide.
   # PS6 PROD KUBERNETES
   ps6-sqa-prod_charm_qa_kubernetes-1: &ps6-sqa-prod_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: remote-k8s
+    cloud: ps6-sqa-prod-charm-qa-kubernetes
+    features: [s3-api]
     kubeconfig-secret: PROD_SQA_KUBECONFIG
     s3-secret-name: S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES
     arch: amd64
@@ -27,6 +31,8 @@ environments:
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: remote-k8s
+    cloud: ps6-sqa-stg-charm-qa-kubernetes
+    features: [s3-api]
     kubeconfig-secret: STG_SQA_KUBECONFIG
     s3-secret-name: S3_PS6_SQA_STG_CHARM_QA_KUBERNETES
     arch: amd64
@@ -45,6 +51,8 @@ environments:
     github-runner: ps7-private-endpoint-runners
     platform: machine
     cloud-type: remote-o7k
+    cloud: ps6-sqa-prod-charm-qa-openstack
+    features: [s3-api]
     novarc-secret: PROD_SQA_NOVARC
     s3-secret-name: S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK
     arch: amd64
@@ -54,6 +62,8 @@ environments:
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: remote-k8s
+    cloud: ps7-sqa-prod-charm-qa-kubernetes
+    features: [s3-api]
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     kubeconfig-secret: PROD_PS7_KUBECONFIG
@@ -91,6 +101,8 @@ environments:
     github-runner: ps7-private-endpoint-runners
     platform: machine
     cloud-type: remote-o7k
+    cloud: ps7-sqa-prod-charm-qa-openstack
+    features: [s3-api]
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     novarc-secret: PROD_PS7_NOVARC
@@ -105,6 +117,8 @@ environments:
     github-runner: ps7-private-endpoint-runners
     platform: machine
     cloud-type: remote-lxd
+    cloud: ps7-sqa-prod-charm-qa-lxd
+    features: [s3-api]
     lxd-secret: PROD_PS7_LXD
     s3-secret-name: S3_PS7_SQA_PROD_CHARM_QA_LXD
     arch: amd64
