@@ -43,6 +43,20 @@ inside the sandbox for other CLI arguments.
 
 Run `scripts/sandbox.sh --help` for VM lifecycle and agent options.
 
+## GitHub-hosted agent
+
+The manually dispatched `Prompt development agent` workflow accepts a prompt and
+an OpenRouter model. Set the repository Actions secret `OPENROUTER_API_KEY`;
+the model must support tool calling and streaming. It runs on a disposable
+Ubuntu runner with the development, integration and agent setup groups. The
+agent can prepare local Kubernetes or LXD using the existing setup tasks.
+
+Download the `development-agent-output` workflow artifact for `response.md`
+and any files the agent placed in `artifacts/`, such as a `.patch` file. No
+branch or pull request is created automatically. Review outputs before sharing
+them: prompts, source files, logs and artifacts can contain sensitive data.
+The agent has unrestricted access to the runner, so only submit trusted tasks.
+
 ## VM setup
 
 `up` installs the stable Mise Snap, then prepares the VM toolchain from the
