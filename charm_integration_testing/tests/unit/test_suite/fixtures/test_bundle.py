@@ -38,6 +38,7 @@ _CATALOG = """
 from bundle_builder_x import (
     BundleBuilder, Charm, CharmChannel, CharmEndpoint, CharmhubClient,
     CharmReleaseNotFoundException, EndpointType, PlatformMismatchError, ReleaseRequest,
+    ReleaseUnavailableError, ReleaseUnavailableKind,
 )
 from bundle_builder_x.charm import EndpointScope
 from juju import JujuVersion
@@ -91,6 +92,19 @@ class Catalog(CharmhubClient):
         self.last_revision = charm_revision
         self.last_track = charm_track
         self.last_risk = charm_risk
+        if charm_revision == 70:
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.REVISION_NOT_FOUND,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    platform=platform,
+                    juju_version=str(juju_version) if juju_version is not None else None,
+                    base=ubuntu_version,
+                    revision=charm_revision,
+                ),
+                detail="Synthetic unavailable historical revision",
+            )
         for charm in self.charms:
             if (
                 charm.name == charm_name
@@ -426,7 +440,7 @@ def test_target_downgrade_uses_compatible_historical_revision(pytester: pytest.P
         + """
 class HistoricalRevisions:
     def iter_historical_revisions_with_passing_deploy(self, **kwargs):
-        return [60, 50]
+        return [70, 60, 50]
 
 @pytest.fixture(scope="session")
 def test_observer_client():
@@ -474,6 +488,75 @@ def test_observer_client():
 
     # THEN it skips the unsupported platform and selects the compatible revision
     result.assert_outcomes(passed=1)
+
+
+def test_unexpected_store_error_in_historical_lookup_remains_an_error(pytester: pytest.Pytester) -> None:
+    # GIVEN a historical revision lookup with an unexpected Charmhub response
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + """
+class UnexpectedCatalog(Catalog):
+    def charm_from_store(self, *args, **kwargs):
+        if kwargs.get("charm_revision") == 60:
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+                request=ReleaseRequest(charm_name="nrpe", platform="machine", revision=60),
+                detail="Synthetic unexpected store response",
+            )
+        return super().charm_from_store(*args, **kwargs)
+
+@pytest.fixture(scope="session")
+def charmhub_client(is_cmr_test):
+    return UnexpectedCatalog(is_cmr_test)
+
+class HistoricalRevisions:
+    def iter_historical_revisions_with_passing_deploy(self, **kwargs):
+        return [60]
+
+@pytest.fixture(scope="session")
+def test_observer_client():
+    return HistoricalRevisions()
+"""
+    )
+    bundle = pytester.path / "saved.yaml"
+    bundle.write_text(
+        "applications:\n"
+        "  target:\n"
+        "    charm: nrpe\n"
+        "    revision: 200\n"
+        "    channel: 1/stable\n"
+        "    base: ubuntu@22.04\n"
+    )
+    pytester.makepyfile(
+        """
+        def test_downgrade_revision(target_downgrade_revision):
+            pass
+        """
+    )
+
+    # WHEN downgrade selection queries Charmhub for the historical revision
+    result = pytester.runpytest(
+        "--current-state",
+        "deployed",
+        "--target-controller",
+        "existing",
+        "--target-model",
+        "existing",
+        "--target-application",
+        "target",
+        "--target-platform",
+        "machine",
+        "--target-bundle",
+        str(bundle),
+        "--target-downgrade-revision",
+        "default",
+        "-q",
+    )
+
+    # THEN the unexpected store response remains an error instead of becoming None
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*Synthetic unexpected store response*"])
 
 
 @pytest.mark.parametrize("revision", ["true", "-1", "0", "'200'"])

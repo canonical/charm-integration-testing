@@ -784,12 +784,13 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int | None:
                 charm_revision=revision,
                 ubuntu_version=target_base,
             )
-        except (
-            ArchitectureMismatchError,
-            AssumesMismatchError,
-            BaseMismatchError,
-            PlatformMismatchError,
-        ):
+        except CharmReleaseNotFoundException as exc:
+            if any(
+                isinstance(error, ReleaseUnavailableError)
+                and error.kind == ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE
+                for error in leaf_release_errors(exc)
+            ):
+                raise
             return False
         return True
 
