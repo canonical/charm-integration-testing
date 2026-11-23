@@ -34,6 +34,60 @@ overrides:
     constraints:
       - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
+  - criteria:
+      - track: '2.0'
+    provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      provide-cmr-mesh:
+        optional: true  # Extra CMR policy data; service_mesh.py::_relations_changed
+    requires:
+      ingress:
+        optional: true  # Alternative to ambient ingress; charm.py::_check_istio_relations rejects both
+        features: [sdi-legacy]
+      istio-ingress-route:
+        optional: true  # Alternative to sidecar ingress; charm.py::_check_istio_relations rejects both
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+      service-mesh:
+        optional: true  # Optional attachment; service_mesh.py::update_service_mesh returns if absent
+      require-cmr-mesh:
+        optional: true  # CMR-only data hook; service_mesh.py::_send_cmr_data
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+      - 'bool(endpoint[ingress]) or bool(endpoint[istio-ingress-route])'
+      - 'not (bool(endpoint[ingress]) and bool(endpoint[istio-ingress-route]))'
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
+  - criteria:
+      - track: 'latest'
+      - risk: edge
+      - ubuntu_version: '24.04'
+    provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      provide-cmr-mesh:
+        optional: true  # Extra CMR policy data; service_mesh.py::_relations_changed
+    requires:
+      ingress:
+        optional: true  # Alternative to ambient ingress; charm.py::_check_istio_relations rejects both
+        features: [sdi-legacy]
+      istio-ingress-route:
+        optional: true  # Alternative to sidecar ingress; charm.py::_check_istio_relations rejects both
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+      service-mesh:
+        optional: true  # Optional attachment; service_mesh.py::update_service_mesh returns if absent
+      require-cmr-mesh:
+        optional: true  # CMR-only data hook; service_mesh.py::_send_cmr_data
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+      - 'bool(endpoint[ingress]) or bool(endpoint[istio-ingress-route])'
+      - 'not (bool(endpoint[ingress]) and bool(endpoint[istio-ingress-route]))'
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
     # Track 1.10 and later have both grafana-dashboard and metrics-endpoint in provides.
   - provides:
       metrics-endpoint:
