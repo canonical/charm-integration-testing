@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -23,6 +24,9 @@ from bundle_builder_x.charmhub_http import (
     RefreshResponse,
     UnparsableCharmException,
 )
+from bundle_builder_x.domain import Domain, DomainApplication, DomainModel, ModelRef, add_charm_to_domain
+from bundle_builder_x.dsl_lowering import LoweringContext, lower
+from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
 from bundle_builder_x.release_errors import AssumesMismatchError, PlatformMismatchError
 from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
@@ -1418,3 +1422,60 @@ class TestCharmhubClient:
 
             # THEN the charm is still present
             assert "charm-a" in result
+
+
+class TestKfpUiLatestEdgeOverride:
+    """kfp-ui latest/edge (Ubuntu 24.04) has no `ingress` endpoint in its published metadata (r2988)."""
+
+    _OVERRIDES_DIR = Path(__file__).parents[3] / "static" / "charm-overrides"
+    # Endpoints of kfp-ui latest/edge r2988, which has no `ingress` relation.
+    _METADATA = CharmMetadata(
+        containers={"ml-pipeline-ui": {"resource": "ml-pipeline-ui"}},
+        provides={"provide-cmr-mesh": CharmMetadata.Endpoint(interface="cross_model_mesh")},
+        requires={
+            "dashboard-links": CharmMetadata.Endpoint(interface="kubeflow_dashboard_links"),
+            "istio-ingress-route": CharmMetadata.Endpoint(interface="istio_ingress_route"),
+            "kfp-api": CharmMetadata.Endpoint(interface="k8s-service"),
+            "logging": CharmMetadata.Endpoint(interface="loki_push_api", optional=True),
+            "object-storage": CharmMetadata.Endpoint(interface="object-storage", limit=1, optional=True),
+            "require-cmr-mesh": CharmMetadata.Endpoint(interface="cross_model_mesh"),
+            "s3-credentials": CharmMetadata.Endpoint(interface="s3", limit=1, optional=True),
+            "service-mesh": CharmMetadata.Endpoint(interface="service_mesh", limit=1),
+        },
+    )
+
+    def test_repository_override_matches_metadata_without_ingress(self) -> None:
+        # GIVEN the repository's kfp-ui override and published r2988 endpoints
+        overrides_client = OverridesClient(overrides=self._OVERRIDES_DIR)
+        response = _refresh_response_with_charm("kfp-ui", revision=2988, metadata=self._METADATA)
+
+        class _StubClient(_NullHttpClient):
+            def refresh(self, action: RefreshAction) -> RefreshResponse:
+                return response
+
+        client = CharmhubClient(http_client=cast(CharmhubHttpClient, _StubClient()), overrides_client=overrides_client)
+
+        # WHEN resolving kfp-ui latest/edge r2988
+        charm = client.charm_from_store(
+            charm_name="kfp-ui",
+            ubuntu_arch="amd64",
+            charm_track="latest",
+            charm_risk="edge",
+            ubuntu_version="24.04",
+        )
+
+        # THEN the charm builds without an ingress endpoint, and every constraint lowers against it
+        assert "ingress" not in charm.endpoints
+        assert {"kfp-api", "object-storage", "s3-credentials"} <= set(charm.endpoints)
+        model_ref = ModelRef(name="default")
+        domain = Domain()
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform=charm.platforms[0],
+            juju_version=JujuVersion(major=3, minor=6, patch=0),
+            applications={"kfp-ui": DomainApplication(charm="kfp-ui")},
+        )
+        charm_id = add_charm_to_domain(charm, domain, model_ref)
+        assert charm.constraints
+        for expr in charm.constraints:
+            lower(expr, LoweringContext(charm_id=charm_id, domain_charm=domain.charms[charm_id], domain=domain))

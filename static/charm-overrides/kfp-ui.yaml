@@ -131,9 +131,6 @@ overrides:
     requires:
       dashboard-links:
         optional: true
-      ingress:
-        optional: true
-        features: [sdi-legacy]
       istio-ingress-route:
         optional: true
       kfp-api:
@@ -143,7 +140,6 @@ overrides:
       service-mesh:
         optional: true
     constraints:
-      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
       - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
