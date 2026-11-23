@@ -41,6 +41,8 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
+      provide-cmr-mesh:
+        optional: true  # Extra CMR policy data; service_mesh.py::_relations_changed
     requires:
       ingress:
         optional: true  # Alternative to ambient ingress; charm.py::_check_istio_relations rejects both
@@ -67,6 +69,8 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
+      provide-cmr-mesh:
+        optional: true  # Extra CMR policy data; service_mesh.py::_relations_changed
     requires:
       ingress:
         optional: true  # Alternative to ambient ingress; charm.py::_check_istio_relations rejects both
