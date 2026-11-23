@@ -9,9 +9,30 @@
 # src/charm.py:_validate_configs() only blocks if the oauth relation *is*
 # present without force_https being true, mirroring the existing saml handling.
 overrides:
-  - configs:
+  # Ubuntu 22.04 revisions support either Redis or Valkey.
+  - criteria:
+      - ubuntu_version: '22.04'
+    configs: &configs
       external_hostname: ['discourse.example.com', null]
       force_https: [true, null]
+    requires:
+      # Discourse migrations create the vector extension.
+      database:
+        features: [vector]
+      redis:
+        optional: true  # src/charm.py::_are_relations_ready accepts Valkey instead.
+      valkey:
+        optional: true  # src/charm.py::_are_relations_ready accepts Redis instead.
+      oauth:
+        optional: true
+        features: [tls]
+    constraints:
+      - 'bool(endpoint[redis]) != bool(endpoint[valkey])'
+      - 'bool(endpoint[database]) => "vector" in features(endpoint[database])'
+      - 'bool(endpoint[saml]) => set(config[external_hostname])'
+      - 'bool(endpoint[saml]) => set(config[force_https])'
+      - 'bool(endpoint[oauth]) => set(config[force_https])'
+  - configs: *configs
     requires:
       oauth:
         optional: true

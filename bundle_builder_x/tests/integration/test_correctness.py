@@ -123,6 +123,7 @@ def test_explicit_integration_appears_in_output(
             integration_endpoints.add(f"{ep.application}:{ep.endpoint}")
     assert "pgbouncer:backend-database" in integration_endpoints
     assert "pg:database" in integration_endpoints
+    assert not bundle.applications["pg"].config.get("plugin_vector_enable", False)
 
 
 def test_multi_model_spec_produces_separate_bundles(

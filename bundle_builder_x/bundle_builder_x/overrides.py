@@ -42,6 +42,7 @@ class CharmEndpointOverrides(BaseModel):
     limit: int | None = None
     cyclic: bool | None = None
     features: set[str] = Field(default_factory=set)
+    additive_features: set[str] = Field(default_factory=set)
     # Whether the remove-and-restore test may tear down this endpoint's integration. False when
     # doing so is fundamentally unsupported, not just flaky. None (unset) means removable.
     removable: bool | None = None

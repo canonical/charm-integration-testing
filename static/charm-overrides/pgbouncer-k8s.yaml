@@ -8,6 +8,8 @@ overrides:
       database:
         optional: true
         features: [tls]
+        # Propagation alone does not provision extensions: https://github.com/canonical/pgbouncer-k8s-operator/issues/877
+        additive_features: [vector]
       db:
         optional: true
         features: [tls]
@@ -15,6 +17,8 @@ overrides:
         optional: true
         features: [tls]
     requires:
+      backend-database:
+        features: [vector]
       certificates:
         optional: true
     constraints:
@@ -26,5 +30,6 @@ overrides:
       - '"tls" in features(endpoint[db]) => bool(endpoint[certificates])'
       # If db-admin endpoint uses tls mode, certificates is required
       - '"tls" in features(endpoint[db-admin]) => bool(endpoint[certificates])'
+      - '("vector" in features(endpoint[database])) == ("vector" in features(endpoint[backend-database]))'
       # Backend database must have the same risk
       - 'risks(charms(endpoint[backend-database])) == risks({self})'

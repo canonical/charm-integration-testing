@@ -325,6 +325,15 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                         feature=f,
                     ).encode(),
                 )
+            elif f in provides_charm.spec.endpoints[integration.provides_endpoint].additive_features:
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, z3.Implies(f_var, prov_ep.features[f])),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
             else:
                 # Both endpoints declare this feature: they must agree when integrated.
                 solver.assert_and_track(
@@ -336,7 +345,10 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                     ).encode(),
                 )
         for f, f_var in prov_ep.features.items():
-            if f not in req_ep.features:
+            if (
+                f not in req_ep.features
+                and f not in provides_charm.spec.endpoints[integration.provides_endpoint].additive_features
+            ):
                 solver.assert_and_track(
                     z3.Implies(integration.exists, z3.Not(f_var)),
                     IntegrationFeatureMismatchTag(
@@ -345,6 +357,19 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                         feature=f,
                     ).encode(),
                 )
+
+    # Additive provider features reflect the union of connected consumers' requests.
+    for charm_id, charm in enumerate(domain.charms):
+        for endpoint_name, endpoint in charm.spec.endpoints.items():
+            for feature in endpoint.additive_features:
+                requirements = []
+                for integration in domain.charm_integrations:
+                    if integration.provides_charm_id != charm_id or integration.provides_endpoint != endpoint_name:
+                        continue
+                    req = domain.charms[integration.requires_charm_id].endpoints[integration.requires_endpoint]
+                    if feature in req.features:
+                        requirements.append(z3.And(integration.exists, req.features[feature]))
+                solver.add(charm.endpoints[endpoint_name].features[feature] == z3.Or(requirements))
 
     # Config domain constraints: when a charm exists, its config variable must equal
     # one of the declared allowed values.

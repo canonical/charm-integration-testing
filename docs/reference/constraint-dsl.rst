@@ -282,20 +282,19 @@ Endpoint feature set
    features(RelationSet)       ->  Set[Str]
 
 The set of distinct features active across all relations on the named endpoint.
-Features must be declared in the endpoint's ``features:`` list in overrides; this
+Features must be declared in an endpoint's ``features:`` or ``additive_features:``
+list in overrides; this
 closed-world declaration is what allows features to be encoded as ``z3.Bool`` variables
 rather than Z3 string variables.
 
-The ``features:`` declaration also automatically generates a structural constraint:
-``endpoint_integrated => feature_x`` for each declared feature. The DSL ``features()``
-function is used to further constrain *which* features must or must not be active:
+The DSL ``features()`` function constrains *which* features must or must not be active:
 
 .. code-block:: yaml
 
    requires:
      admin:
        optional: false
-       features: ["admin"]   # declares the feature universe; generates integrated => feature_admin
+       features: ["admin"]
    constraints:
      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}  # pins to exactly this feature set
 
@@ -308,7 +307,7 @@ The two mechanisms have distinct roles:
    * - Mechanism
      - Role
    * - ``features: [...]`` on endpoint
-     - Declares feature universe; enables boolean encoding; generates ``integrated => feature_x``
+     - Declares the feature universe and enables boolean encoding
    * - ``features(endpoint[x]) == {...}`` in DSL
      - Restricts which features may be active; prevents undeclared combinations
 
@@ -320,6 +319,12 @@ forced inactive, and a feature declared on both sides must agree. This
 prevents pairing charms whose feature sets don't overlap. Failures are
 reported via ``INTEGRATION_FEATURE_MISMATCH`` and
 ``FeatureMismatchDiagnostic`` values in ``UncompletableBundleError.diagnostics``.
+
+For provider capabilities that can be enabled for one consumer without requiring
+every other consumer to declare them, use ``additive_features:`` on the provides
+endpoint. Such a feature is active if any connected consumer requests it; consumers
+that do not declare it remain compatible. The requiring endpoint declares it under
+``features:`` and uses a constraint to request it. This also applies across models.
 
 Config value
 ~~~~~~~~~~~~

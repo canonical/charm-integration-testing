@@ -29,12 +29,16 @@ overrides:
     resource_tracking: &resource_tracking
       skip:
         - pvc
+    configs:
+      plugin-vector-enable: [true, null]
     provides:
       database:
         limit: 1
         optional: true
         features: [tls]
+        additive_features: [vector]
     constraints:
+      - '"vector" in features(endpoint[database]) => set(config[plugin-vector-enable])'
       # If database endpoint uses tls mode, client-certificates is required
       - '"tls" in features(endpoint[database]) => bool(endpoint[client-certificates])'
       # replication must be same track/risk
@@ -44,6 +48,8 @@ overrides:
     criteria:
       - track: '14'
     resource_tracking: *resource_tracking
+    configs:
+      plugin_vector_enable: [true, null]
     provides:
       metrics-endpoint:
         optional: true
@@ -53,6 +59,7 @@ overrides:
         limit: 1
         optional: true
         features: [tls]
+        additive_features: [vector]
       db:
         limit: 1
         optional: true
@@ -62,6 +69,7 @@ overrides:
         optional: true
         features: [tls]
     constraints:
+      - '"vector" in features(endpoint[database]) => set(config[plugin_vector_enable])'
       # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
       - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) <= 1
       # If database endpoint uses tls mode, certificates is required

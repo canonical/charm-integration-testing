@@ -9,19 +9,26 @@
 overrides:
   - criteria:
       - track: '16'
+    configs:
+      plugin_vector_enable: [true, null]
     provides:
       database:
         features: [tls]
+        additive_features: [vector]
     constraints:
+      - '"vector" in features(endpoint[database]) => set(config[plugin_vector_enable])'
       # If database endpoint uses tls mode, client-certificates is required
       - '"tls" in features(endpoint[database]) => bool(endpoint[client-certificates])'
   - criteria:
       - track: '14'
+    configs:
+      plugin_vector_enable: [true, null]
     provides:
       database:
         limit: 1
         optional: true
         features: [tls]
+        additive_features: [vector]
       db:
         limit: 1
         optional: true
@@ -31,6 +38,7 @@ overrides:
         optional: true
         features: [tls]
     constraints:
+      - '"vector" in features(endpoint[database]) => set(config[plugin_vector_enable])'
       # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
       - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) <= 1
       # If a client endpoint uses tls mode, certificates is required.

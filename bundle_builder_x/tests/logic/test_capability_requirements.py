@@ -27,6 +27,145 @@ from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
 
 
+@pytest.mark.parametrize("with_proxy", [False, True])
+@pytest.mark.parametrize("with_request", [False, True])
+def test_additive_feature_with_shared_database(with_proxy: bool, with_request: bool) -> None:
+    provider = make_charm(
+        "provider",
+        endpoints={
+            "database": CharmEndpoint(
+                type=EndpointType.PROVIDES,
+                interface="database",
+                optional=True,
+                features=frozenset({"vector"}),
+                additive_features=frozenset({"vector"}),
+            )
+        },
+        configs={"vector": [True, None]},
+        config_defaults={"vector": False},
+        constraint_strs=['"vector" in features(endpoint[database]) => set(config[vector])'],
+    )
+    requester = make_charm(
+        "requester",
+        endpoints={
+            "database": CharmEndpoint(
+                type=EndpointType.REQUIRES,
+                interface="database",
+                features=frozenset({"vector"}),
+            )
+        },
+        constraint_strs=['bool(endpoint[database]) => "vector" in features(endpoint[database])'],
+    )
+    client = make_charm(
+        "client",
+        endpoints={"database": CharmEndpoint(type=EndpointType.REQUIRES, interface="database")},
+    )
+    proxy = make_charm(
+        "proxy",
+        endpoints={
+            "database": CharmEndpoint(
+                type=EndpointType.PROVIDES,
+                interface="database",
+                optional=True,
+                features=frozenset({"vector"}),
+                additive_features=frozenset({"vector"}),
+            ),
+            "backend": CharmEndpoint(
+                type=EndpointType.REQUIRES,
+                interface="database",
+                features=frozenset({"vector"}),
+            ),
+        },
+        constraint_strs=['("vector" in features(endpoint[database])) == ("vector" in features(endpoint[backend]))'],
+    )
+    builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requester, client, proxy))
+    applications = {"provider": AppSpec(charm="provider"), "client": AppSpec(charm="client")}
+    database = "proxy" if with_proxy else "provider"
+    integrations = [
+        IntegrationSpec(
+            application="client", endpoint="database", remote_application=database, remote_endpoint="database"
+        )
+    ]
+    if with_proxy:
+        applications["proxy"] = AppSpec(charm="proxy")
+        integrations.append(
+            IntegrationSpec(
+                application="proxy", endpoint="backend", remote_application="provider", remote_endpoint="database"
+            )
+        )
+    if with_request:
+        applications["requester"] = AppSpec(charm="requester")
+        integrations.append(
+            IntegrationSpec(
+                application="requester", endpoint="database", remote_application=database, remote_endpoint="database"
+            )
+        )
+
+    bundle = build_single_model(builder, applications, integrations)
+
+    assert bundle.applications["provider"].config.get("vector", False) is with_request
+
+
+def test_additive_feature_with_cross_model_request() -> None:
+    provider = make_charm(
+        "provider",
+        endpoints={
+            "database": CharmEndpoint(
+                type=EndpointType.PROVIDES,
+                interface="database",
+                optional=True,
+                features=frozenset({"vector"}),
+                additive_features=frozenset({"vector"}),
+            )
+        },
+        configs={"vector": [True, None]},
+        config_defaults={"vector": False},
+        constraint_strs=['"vector" in features(endpoint[database]) => set(config[vector])'],
+    )
+    requester = make_charm(
+        "requester",
+        endpoints={
+            "database": CharmEndpoint(
+                type=EndpointType.REQUIRES,
+                interface="database",
+                features=frozenset({"vector"}),
+            )
+        },
+        constraint_strs=['bool(endpoint[database]) => "vector" in features(endpoint[database])'],
+    )
+    builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requester))
+    solution = build_multi_model(
+        builder,
+        [
+            ModelSpec(
+                name="requester",
+                controller="k8s",
+                juju=JUJU_VERSION,
+                applications={"requester": AppSpec(charm="requester")},
+                integrations=[
+                    IntegrationSpec(
+                        application="requester",
+                        endpoint="database",
+                        remote_model="provider",
+                        remote_controller="k8s",
+                        remote_application="provider",
+                        remote_endpoint="database",
+                    )
+                ],
+            ),
+            ModelSpec(
+                name="provider",
+                controller="k8s",
+                juju=JUJU_VERSION,
+                applications={"provider": AppSpec(charm="provider")},
+            ),
+        ],
+    )
+
+    bundle = next(bundle for bundle in solution.bundles if "provider" in bundle.applications)
+    assert bundle.applications["provider"].config["vector"] is True
+
+
 class TestCapabilityRequirements:
     """Section 5: Feature-constrained endpoint selection."""
 

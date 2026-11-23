@@ -901,7 +901,7 @@ class CharmhubClient:
                     cyclic = False
 
                 # Calculate features
-                features = frozenset(endpoint_override.features)
+                features = frozenset(endpoint_override.features | endpoint_override.additive_features)
 
                 # Calculate removable
                 if endpoint_override.removable is not None:
@@ -918,6 +918,7 @@ class CharmhubClient:
                     scope=endpoint.scope,
                     cyclic=cyclic,
                     features=features,
+                    additive_features=frozenset(endpoint_override.additive_features),
                     removable=removable,
                 )
 

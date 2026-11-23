@@ -29,10 +29,16 @@ overrides:
   - provides:
       cos-agent:
         optional: true
+      database:
+        additive_features: [vector]
     requires:
+      backend-database:
+        features: [vector]
       ha:
         optional: true
       certificates:
         optional: true
       tracing:
         optional: true
+    constraints:
+      - '("vector" in features(endpoint[database])) == ("vector" in features(endpoint[backend-database]))'

@@ -1169,6 +1169,19 @@ class TestCharmhubClient:
             # THEN the endpoint is present
             assert "web" in endpoints
 
+        def test_additive_provider_features_are_available_to_constraints(self) -> None:
+            client = _client(
+                {"overrides": [{"provides": {"web": {"features": ["tls"], "additive_features": ["vector"]}}}]}
+            )
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL, _UBUNTU_VERSION)
+            assert endpoints["web"].features == {"tls", "vector"}
+            assert endpoints["web"].additive_features == {"vector"}
+
+        def test_additive_features_on_requires_are_rejected(self) -> None:
+            client = _client({"overrides": [{"requires": {"db": {"additive_features": ["vector"]}}}]})
+            with pytest.raises(ValueError, match="only supported on provides"):
+                client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
+
         def test_no_override_returns_metadata_endpoints(self) -> None:
             # GIVEN no overrides
             client = _client({})
