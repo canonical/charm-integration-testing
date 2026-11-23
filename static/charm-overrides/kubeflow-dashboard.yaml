@@ -49,6 +49,10 @@ overrides:
         optional: true  # Alternative to sidecar ingress; charm.py::_check_istio_relations rejects both
       kubeflow-profiles:
         features: [kubeflow-profiles]
+      service-mesh:
+        optional: true  # Optional attachment; service_mesh.py::update_service_mesh returns if absent
+      require-cmr-mesh:
+        optional: true  # CMR-only data hook; service_mesh.py::_send_cmr_data
     constraints:
       - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - 'bool(endpoint[ingress]) or bool(endpoint[istio-ingress-route])'
@@ -71,6 +75,10 @@ overrides:
         optional: true  # Alternative to sidecar ingress; charm.py::_check_istio_relations rejects both
       kubeflow-profiles:
         features: [kubeflow-profiles]
+      service-mesh:
+        optional: true  # Optional attachment; service_mesh.py::update_service_mesh returns if absent
+      require-cmr-mesh:
+        optional: true  # CMR-only data hook; service_mesh.py::_send_cmr_data
     constraints:
       - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - 'bool(endpoint[ingress]) or bool(endpoint[istio-ingress-route])'
