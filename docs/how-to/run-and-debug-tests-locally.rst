@@ -222,10 +222,10 @@ tag, or ``git describe`` version, with the charm at the repository root.
 
 Fresh runs share the synthesized target release across bundle export, lint,
 and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
-without rebuilding. Lint skips when the target cannot be resolved or Git is
-unavailable; malformed bundles, missing provenance, download, checkout, and
-lint failures remain failures. Refresh tests skip if the saved bundle has no
-revision to restore.
+without rebuilding. Source and refresh fixtures return ``None`` for unavailable
+inputs; the consuming tests decide whether to skip. Malformed bundles, missing
+provenance, download, checkout, and lint failures remain failures. Refresh tests
+skip if the saved bundle has no revision to restore.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap

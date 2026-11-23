@@ -279,13 +279,23 @@ def test_resumed_run_uses_saved_target_selectors(
             assert charmhub_client.last_juju_version == JujuVersion.parse("3.6.29")
 
         def test_restore(target_resolved_charm_for_refresh):
-            assert target_resolved_charm_for_refresh.revision == {expected_revision}
+            if {requested_revision!r} is None:
+                assert target_resolved_charm_for_refresh is None
+            else:
+                if {requested_revision!r} is None:
+                    assert target_resolved_charm_for_refresh is None
+                else:
+                    assert target_resolved_charm_for_refresh.revision == {expected_revision}
         """
     )
     if requested_revision is None:
         pytester.makepyfile(
             test_downgrade="""
+            import pytest
+
             def test_downgrade_requires_original_revision(target_downgrade_revision):
+                if target_downgrade_revision is None:
+                    pytest.skip("No original target revision is available for refresh.")
                 raise AssertionError("Downgrade must not run without an original revision")
             """
         )
@@ -309,15 +319,11 @@ def test_resumed_run_uses_saved_target_selectors(
         "-rs",
     )
 
-    # THEN lookup honors saved selectors, but refresh cannot guess an original revision
+    # THEN lookup honors saved selectors, while the test decides to skip when refresh is unavailable
     if requested_revision is None:
-        result.assert_outcomes(passed=1, skipped=2)
-        reason = "The saved bundle has no target revision to restore after downgrade."
+        result.assert_outcomes(passed=2, skipped=1)
         result.stdout.fnmatch_lines(
-            [
-                f"SKIPPED *test_downgrade.py:*{reason}",
-                f"SKIPPED *test_resumed_run_uses_saved_target_selectors.py:*{reason}",
-            ]
+            ["*SKIPPED *test_downgrade.py:*No original target revision is available for refresh.*"]
         )
     else:
         result.assert_outcomes(passed=2)

@@ -14,12 +14,15 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED_WITH_OLD_REVISION, provides=State.DEPLOYED)
 def test_upgrade_charm(
     juju_client: JujuClient,
-    target_downgrade_revision: int,
+    target_downgrade_revision: int | None,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
-    target_resolved_charm_for_refresh: Charm,
+    target_resolved_charm_for_refresh: Charm | None,
 ) -> None:
+    if target_downgrade_revision is None or target_resolved_charm_for_refresh is None:
+        pytest.skip("A resolvable target and compatible downgrade revision are required for the refresh cycle.")
+
     target_revision = target_resolved_charm_for_refresh.revision
     resolved_target_channel = str(target_resolved_charm_for_refresh.channel)
 

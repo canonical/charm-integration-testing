@@ -40,7 +40,7 @@ def _create_bundle_with_revision_override(
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_deploy_target_old_revision(
     juju_client: JujuClient,
-    target_downgrade_revision: int,
+    target_downgrade_revision: int | None,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
@@ -48,6 +48,9 @@ def test_deploy_target_old_revision(
     tmp_path: Path,
     target_bundle: Path,
 ) -> None:
+    if target_downgrade_revision is None:
+        pytest.skip("A compatible downgrade revision is required for this test.")
+
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
     )

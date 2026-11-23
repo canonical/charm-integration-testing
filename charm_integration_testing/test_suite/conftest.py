@@ -746,16 +746,18 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
 
 
 @pytest.fixture
-def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
+def target_downgrade_revision(request: pytest.FixtureRequest) -> int | None:
     """Revision to downgrade to for the charm under test.
 
     When ``--target-downgrade-revision`` is an explicit integer, that value is
     used. When the value is ``"default"``, Test Observer is queried for a
-    historical revision with a passing deploy for the target charm. Either way
+    historical revision with a passing deploy for the target charm. Either way,
     the selected revision is validated against the base the target is deployed
-    on, and the cycle is skipped when the two are incompatible.
+    on. Returns ``None`` when the refresh cycle cannot be run.
     """
-    target: Charm = request.getfixturevalue("target_resolved_charm_for_refresh")
+    target: Charm | None = request.getfixturevalue("target_resolved_charm_for_refresh")
+    if target is None:
+        return None
     target_charm = target.name
     target_arch: str = request.getfixturevalue("target_arch")
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
@@ -782,16 +784,10 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     if value != "default":
         previous_revision = int(value)
         if not supports_target_base(previous_revision):
-            pytest.skip(
-                f"Charm '{target_charm}' revision {previous_revision} does not support base '{target_base}' "
-                "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
-            )
+            return None
         return previous_revision
     if resolved_channel.branch:
-        pytest.skip(
-            f"Unable to select a historical revision for branched channel '{resolved_channel}': "
-            "Test Observer history is not branch-specific. Set --target-downgrade-revision explicitly."
-        )
+        return None
     test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     try:
         historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
@@ -806,13 +802,8 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
-    # No usable historical revision (e.g. all prior revisions predate a base change and are
-    # unreachable without --force-series). Skip rather than fail so the downgrade/upgrade
-    # cycle is reported as untestable instead of a test failure.
-    pytest.skip(
-        "Unable to find a historical revision with a passing test_deploy result "
-        f"for charm '{target_charm}' in channel '{resolved_channel}'."
-    )
+    # No usable historical revision, for example when all earlier releases use another base.
+    return None
 
 
 @pytest.fixture(scope="session")

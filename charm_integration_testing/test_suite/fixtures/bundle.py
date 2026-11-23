@@ -172,11 +172,11 @@ def target_resolved_charm(
 
 
 @pytest.fixture(scope="session")
-def target_resolved_charm_for_refresh(request: pytest.FixtureRequest) -> Charm:
-    """Require a recorded original revision before starting or resuming a refresh cycle."""
+def target_resolved_charm_for_refresh(request: pytest.FixtureRequest) -> Charm | None:
+    """Resolve the target for a refresh cycle, or return None when it cannot be restored."""
     if State(request.config.getoption("--current-state")) != State.NO_BUNDLE:
         application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
         if application.revision is None:
-            pytest.skip("The saved bundle has no target revision to restore after downgrade.")
+            return None
     target: Charm = request.getfixturevalue("target_resolved_charm")
     return target
