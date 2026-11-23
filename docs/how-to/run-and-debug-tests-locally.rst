@@ -217,8 +217,6 @@ Lint the target charm's source
 ``test_charmlint`` checks out the source revision recorded in the selected
 Charmhub charm, so source-only files are included. The default case fails on
 errors; ``test_charmlint_strict`` also fails on warnings. Both log full output.
-The archive must provide a public HTTPS source repository and a clean commit,
-tag, or ``git describe`` version, with the charm at the repository root.
 
 Fresh runs share the synthesized target release across bundle export, lint,
 and refresh tests. Resumed runs resolve from the existing ``--target-bundle``

@@ -83,6 +83,9 @@ from bundle_builder_x import (
     UnresolvedIntegrationDiagnostic,
     leaf_release_errors,
 )
+from bundle_builder_x import (
+    JujuVersion as BundleJujuVersion,
+)
 from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
 from test_suite.fixtures.juju import get_juju_client_for_registered_models
 from test_suite.remote_logging import (
@@ -760,30 +763,40 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int | None:
         return None
     target_charm = target.name
     target_arch: str = request.getfixturevalue("target_arch")
+    target_platform: str = request.getfixturevalue("target_platform")
+    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
     target_base = target.ubuntu_version
     resolved_channel = target.channel
+    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
 
-    def supports_target_base(revision: int) -> bool:
+    def supports_target_environment(revision: int) -> bool:
         try:
             charmhub_client.charm_from_store(
                 charm_name=target_charm,
                 ubuntu_arch=target_arch,
+                platform=target_platform,
+                juju_version=bundle_juju_version,
                 charm_track=resolved_channel.track,
                 charm_risk=resolved_channel.risk,
                 charm_branch=resolved_channel.branch or None,
                 charm_revision=revision,
                 ubuntu_version=target_base,
             )
-        except BaseMismatchError:
+        except (
+            ArchitectureMismatchError,
+            AssumesMismatchError,
+            BaseMismatchError,
+            PlatformMismatchError,
+        ):
             return False
         return True
 
     value = request.config.getoption("--target-downgrade-revision")
     if value != "default":
         previous_revision = int(value)
-        if not supports_target_base(previous_revision):
+        if not supports_target_environment(previous_revision):
             return None
         return previous_revision
     if resolved_channel.branch:
@@ -797,7 +810,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int | None:
             track=resolved_channel.explicit_track,
         )
         for candidate_revision in historical_revisions:
-            if supports_target_base(candidate_revision):
+            if supports_target_environment(candidate_revision):
                 return candidate_revision
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc

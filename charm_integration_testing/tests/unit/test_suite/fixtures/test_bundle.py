@@ -37,7 +37,7 @@ def git_client():
 _CATALOG = """
 from bundle_builder_x import (
     BundleBuilder, Charm, CharmChannel, CharmEndpoint, CharmhubClient,
-    CharmReleaseNotFoundException, EndpointType,
+    CharmReleaseNotFoundException, EndpointType, PlatformMismatchError, ReleaseRequest,
 )
 from bundle_builder_x.charm import EndpointScope
 from juju import JujuVersion
@@ -61,6 +61,16 @@ class Catalog(CharmhubClient):
                 name="nrpe", channel="1/stable", revision=200,
                 ubuntu_arch="amd64", ubuntu_version="22.04", subordinate=not cmr,
                 endpoints={"general-info": endpoint}, platforms=["machine"],
+            ),
+            Charm(
+                name="nrpe", channel="1/stable", revision=50,
+                ubuntu_arch="amd64", ubuntu_version="22.04", subordinate=not cmr,
+                endpoints={"general-info": endpoint}, platforms=["machine"],
+            ),
+            Charm(
+                name="nrpe", channel="1/stable", revision=60,
+                ubuntu_arch="amd64", ubuntu_version="22.04", subordinate=not cmr,
+                endpoints={"general-info": endpoint}, platforms=["kubernetes"],
             ),
             Charm(
                 name="ubuntu", channel="latest/stable", revision=300,
@@ -89,6 +99,20 @@ class Catalog(CharmhubClient):
                 and (charm_revision is None or charm.revision == charm_revision)
                 and (ubuntu_version is None or charm.ubuntu_version == ubuntu_version)
             ):
+                if platform is not None and platform not in charm.platforms:
+                    raise PlatformMismatchError(
+                        request=ReleaseRequest(
+                            charm_name=charm_name,
+                            architecture=ubuntu_arch,
+                            platform=platform,
+                            juju_version=str(juju_version) if juju_version is not None else None,
+                            base=ubuntu_version,
+                            channel=str(charm.channel),
+                            revision=charm.revision,
+                        ),
+                        requested_platform=platform,
+                        supported_platforms=tuple(charm.platforms),
+                    )
                 return charm
         raise CharmReleaseNotFoundException("No matching synthetic release")
 
@@ -391,6 +415,64 @@ def test_unavailable_pinned_revision_returns_none(pytester: pytest.Pytester) -> 
         "-q",
     )
 
+    result.assert_outcomes(passed=1)
+
+
+def test_target_downgrade_uses_compatible_historical_revision(pytester: pytest.Pytester) -> None:
+    # GIVEN the historical revision list includes an incompatible candidate first
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + """
+class HistoricalRevisions:
+    def iter_historical_revisions_with_passing_deploy(self, **kwargs):
+        return [60, 50]
+
+@pytest.fixture(scope="session")
+def test_observer_client():
+    return HistoricalRevisions()
+"""
+    )
+    bundle = pytester.path / "saved.yaml"
+    bundle.write_text(
+        "applications:\n"
+        "  target:\n"
+        "    charm: nrpe\n"
+        "    revision: 200\n"
+        "    channel: 1/stable\n"
+        "    base: ubuntu@22.04\n"
+    )
+    pytester.makepyfile(
+        """
+        def test_downgrade_revision(target_downgrade_revision, charmhub_client):
+            from bundle_builder_x import JujuVersion
+
+            assert target_downgrade_revision == 50
+            assert charmhub_client.last_platform == "machine"
+            assert charmhub_client.last_juju_version == JujuVersion.parse("3.6.29")
+        """
+    )
+
+    # WHEN downgrade selection checks candidates against the resumed target environment
+    result = pytester.runpytest(
+        "--current-state",
+        "deployed",
+        "--target-controller",
+        "existing",
+        "--target-model",
+        "existing",
+        "--target-application",
+        "target",
+        "--target-platform",
+        "machine",
+        "--target-bundle",
+        str(bundle),
+        "--target-downgrade-revision",
+        "default",
+        "-q",
+    )
+
+    # THEN it skips the unsupported platform and selects the compatible revision
     result.assert_outcomes(passed=1)
 
 
