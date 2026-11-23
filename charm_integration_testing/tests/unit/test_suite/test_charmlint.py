@@ -72,12 +72,22 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
     pytester.makeconftest(
         """
         import logging
+        from types import SimpleNamespace
         import pytest
         from test_suite.conftest import git_client, record_pipeline_version_execution_metadata
+        from test_suite.fixtures.charm_source import target_charm_source
 
         @pytest.fixture(scope="session")
         def logger():
             return logging.getLogger("test")
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            return SimpleNamespace(name="example", revision=1)
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            return object()
 
         @pytest.fixture
         def execution_metadata():
@@ -86,15 +96,14 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
         @pytest.fixture(autouse=True)
         def record_metadata(record_pipeline_version_execution_metadata):
             pass
-
-        @pytest.fixture
-        def target_charm_source():
-            pytest.fail("Source must not be acquired without Git")
         """
     )
     pytester.makepyfile(
         """
         from test_suite.test_charmlint import test_charmlint
+
+        def test_source_fixture_returns_none(target_charm_source):
+            assert target_charm_source is None
 
         def test_unrelated():
             pass
@@ -103,8 +112,8 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
 
     result = pytester.runpytest("-rs")
 
-    result.assert_outcomes(passed=1, skipped=1)
-    result.stdout.fnmatch_lines(["*Git is not installed*"])
+    result.assert_outcomes(passed=2, skipped=1)
+    result.stdout.fnmatch_lines(["*could not be resolved for linting*"])
 
 
 def test_pipeline_metadata_skips_describe_when_git_log_fails(pytester: pytest.Pytester) -> None:

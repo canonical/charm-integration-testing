@@ -226,8 +226,8 @@ test; it does not fall back to the packed charm or a default branch. The source
 checkout must have the target charm at its root. Non-GitHub revisions are
 fetched directly first; only unresolved abbreviated revisions require scanning
 advertised refs, with blob filtering where supported by the Git server.
-The lint test skips if Git is not installed; source download and checkout errors
-otherwise fail the test.
+The source fixture returns ``None`` if Git is unavailable, and the lint test
+decides to skip; source download and checkout errors otherwise fail the test.
 
 Run it with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap

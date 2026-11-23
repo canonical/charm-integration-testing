@@ -371,6 +371,43 @@ def test_checkout_accepts_build_only_charmcraft(tmp_path: Path) -> None:
     module._verify_charm_root(tmp_path, "example")
 
 
+def test_missing_git_returns_none(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        """
+        import logging
+        from types import SimpleNamespace
+        import pytest
+        from test_suite.fixtures.charm_source import target_charm_source
+
+        @pytest.fixture(scope="session")
+        def logger():
+            return logging.getLogger("test")
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            return SimpleNamespace(name="example", revision=1)
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            return object()
+
+        @pytest.fixture(scope="session")
+        def git_client():
+            return None
+        """
+    )
+    pytester.makepyfile(
+        test_missing_git="""
+        def test_source_fixture_returns_none(target_charm_source):
+            assert target_charm_source is None
+        """
+    )
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(passed=1)
+
+
 @pytest.mark.parametrize("stage", ["download", "checkout"])
 def test_source_acquisition_failure_fails_lint(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, stage: str

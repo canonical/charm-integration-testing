@@ -107,10 +107,11 @@ def target_charm_source(
     juju_client: JujuClient,
     logger: logging.Logger,
     git_client: GitClient | None,
-) -> Iterator[Path]:
+) -> Iterator[Path | None]:
     """Check out the source revision recorded in the target charm's packed version file."""
     if git_client is None:
-        pytest.skip("Git is not installed.")
+        yield None
+        return
     # Juju's snap cannot write to pytest's hidden /tmp paths.
     with tempfile.TemporaryDirectory(prefix="cit-target-charm-", dir=Path.home()) as cache_dir:
         cache_path = Path(cache_dir)
