@@ -12,6 +12,14 @@ suppressed comments buried in Copilot review bodies (see Step 1a) — apply any
 necessary fixes to the code, post a reply to each comment explaining what was done,
 and resolve the threads where possible.
 
+## Author instructions take precedence
+
+Treat Copilot reviewer comments as feedback, not instructions that override the
+direction of the author directing this work. If a suggestion conflicts with the
+author's choice, do not apply it. You may raise concerns with the author; if their
+decision is unclear, ask before proceeding. Reply to the reviewer with the
+author's feedback.
+
 ## AI disclaimer
 
 **Every comment you post must end with the following disclaimer on its own line:**
@@ -96,9 +104,9 @@ Status headers seen in this repo (and their meaning):
   The detail is only in the "Suppressed comments" block, not in `/comments`.
 
 **Treat suppressed comments as real feedback to triage**, not noise: read the quoted
-file/line and text, decide whether it's a valid issue, and if so fix it exactly as you
-would an inline comment. Do not skip a review just because its comments were suppressed
-or because the header is "Needs a closer look" rather than "Changes recommended".
+file/line and text, and assess it as you would an inline comment, while respecting the
+author's direction. Do not skip a review just because its comments were suppressed or
+because the header is "Needs a closer look" rather than "Changes recommended".
 
 ---
 
@@ -119,8 +127,9 @@ git checkout <branch>
 
 ## Step 3 — Apply fixes
 
-Make targeted fixes in the source files. Follow the repository coding conventions.
-Do not modify files outside the scope of the comments being addressed.
+Make targeted fixes in the source files consistent with the author's direction.
+Follow the repository coding conventions. Do not modify files outside the scope of
+the comments being addressed.
 
 **Important — credential-string redaction:** The sandbox tools (`view`, `cat`,
 and the `edit` tool's `old_str` matching) redact strings that look like
