@@ -1,0 +1,83 @@
+# DRAFT proposal for SQT-1464: a structured, versioned run specification.
+#
+# The file says WHAT to test, plus the NEEDS of where to test it. It never names
+# the place (environment, slot, runner, cloud, credentials); those come from the
+# environment definition (static/environments.yaml) or the invocation.
+#
+# Shape: the bundle builder spec (docs/reference/spec-file.rst) plus `needs` per
+# model and a `test` block. Topology is implied by the structure: one model is a
+# plain run, two models sharing a controller are CMR, two on separate
+# controllers are CCR. No scheduler topology names appear here.
+#
+# Proposed precedence: CLI flag > environment variable > this file > default.
+# No secrets or credentials are allowed in this file.
+
+version: 1
+
+# Juju client snap channel for the run.
+juju: 3.6/stable
+
+models:
+  - name: target
+    # Controller labels are symbolic: models with the same label share a
+    # controller. Real controller and model names are generated per run.
+    controller: primary
+    # Requirements on where this model runs. Replaces `platform`.
+    needs:
+      features: [k8s-api, s3-api]
+      arch: amd64 # QUESTION: a feature (arch-amd64) or a dedicated field?
+    applications:
+      postgresql:
+        charm: postgresql-k8s
+        channel: 14/stable
+        revision: 468
+        base: ubuntu@22.04
+    integrations:
+      - application: postgresql
+        endpoint: database
+        remote_application: data-integrator
+        remote_endpoint: postgresql
+        remote_model: neighbor
+
+  - name: neighbor
+    controller: secondary # same label as `target` would make this CMR instead of CCR
+    needs:
+      features: [lxd-api]
+      arch: amd64
+    applications:
+      data-integrator:
+        charm: data-integrator
+
+# What to test: the integration under test. Replaces --target-charm,
+# --target-application, --target-endpoint, --neighbor-application and
+# --neighbor-endpoint. Must match an integration declared above.
+test:
+  application: postgresql
+  endpoint: database
+  downgrade-revision: 450 # optional; "default" lets Test Observer pick one
+
+# Pre-built variant (QUESTION: is this the right shape?)
+# ------------------------------------------------------
+# A model may carry a bundle_builder_x output bundle instead of `applications`
+# and `integrations`. The two forms are mutually exclusive per model.
+#
+#   - name: target
+#     controller: primary
+#     needs: {features: [k8s-api, s3-api], arch: amd64}
+#     bundle:
+#       applications: {postgresql: {charm: postgresql-k8s, ...}}
+#       relations: [...]
+#
+# If every model has `bundle`, the suite starts at `--current-state no_controller`
+# and skips test_build_bundle; otherwise it starts at `no_bundle` and builds.
+# Mixing the two forms in one spec is rejected. `test` is validated against the
+# bundle, and the bundle wins on any conflict.
+#
+# Open questions
+# --------------
+# - Does the exported bundle embed run-specific controller/model names (CMR
+#   offers and consumes)? If so, they need rewriting on load.
+# - Should `bundle` also accept a relative path, or inline only?
+# - Short form for the common single-charm-against-one-neighbor case?
+# - Should the suite emit this file after test_build_bundle, so every run
+#   produces a reproduction spec?
