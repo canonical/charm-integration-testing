@@ -14,6 +14,7 @@ from bundle_builder_x import (
     Charm,
     CharmChannel,
     CharmhubClient,
+    CharmReleaseNotFoundException,
     IntegrationSpec,
     ModelSpec,
     Solution,
@@ -120,7 +121,7 @@ def bundle_solution(
 class _TargetCharmSelectors(BaseModel):
     charm: str
     channel: CharmChannel | None = None
-    revision: int | None = Field(default=None, strict=True, ge=0)
+    revision: int | None = Field(default=None, strict=True, ge=1)
     base: str | None = Field(default=None, pattern=r"^ubuntu@\d+\.\d+$")
 
 
@@ -142,7 +143,7 @@ def target_resolved_charm(
     target_application: str,
     target_controller: str,
     model: str,
-) -> Charm:
+) -> Charm | None:
     """Resolve the target from the synthesized solution or saved bundle selectors."""
     if State(request.config.getoption("--current-state")) == State.NO_BUNDLE:
         solution: Solution = request.getfixturevalue("bundle_solution")
@@ -150,7 +151,7 @@ def target_resolved_charm(
         for bundle in solution.bundles:
             if bundle.model == model_key:
                 return bundle.applications[target_application].charm
-        raise ValueError(f"Generated solution has no bundle for model {model_key!r}.")
+        pytest.fail(f"Generated solution has no bundle for model {model_key!r}.")
 
     application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
     channel = application.channel
@@ -158,17 +159,20 @@ def target_resolved_charm(
     arch: str = request.getfixturevalue("target_arch")
     platform: str = request.getfixturevalue("target_platform")
     juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
-    return client.charm_from_store(
-        charm_name=application.charm,
-        ubuntu_arch=arch,
-        platform=platform,
-        juju_version=BundleJujuVersion.parse(str(juju_cli_version)),
-        charm_track=channel.track if channel is not None else None,
-        charm_risk=channel.risk if channel is not None else None,
-        charm_branch=(channel.branch or None) if channel is not None else None,
-        charm_revision=application.revision,
-        ubuntu_version=application.base.removeprefix("ubuntu@") if application.base is not None else None,
-    )
+    try:
+        return client.charm_from_store(
+            charm_name=application.charm,
+            ubuntu_arch=arch,
+            platform=platform,
+            juju_version=BundleJujuVersion.parse(str(juju_cli_version)),
+            charm_track=(channel.track or None) if channel is not None else None,
+            charm_risk=(channel.risk or None) if channel is not None else None,
+            charm_branch=(channel.branch or None) if channel is not None else None,
+            charm_revision=application.revision,
+            ubuntu_version=application.base.removeprefix("ubuntu@") if application.base is not None else None,
+        )
+    except CharmReleaseNotFoundException:
+        return None
 
 
 @pytest.fixture(scope="session")
@@ -178,5 +182,5 @@ def target_resolved_charm_for_refresh(request: pytest.FixtureRequest) -> Charm |
         application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
         if application.revision is None:
             return None
-    target: Charm = request.getfixturevalue("target_resolved_charm")
+    target: Charm | None = request.getfixturevalue("target_resolved_charm")
     return target

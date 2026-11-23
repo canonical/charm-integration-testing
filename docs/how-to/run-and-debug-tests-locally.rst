@@ -222,10 +222,21 @@ tag, or ``git describe`` version, with the charm at the repository root.
 
 Fresh runs share the synthesized target release across bundle export, lint,
 and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
-without rebuilding. Source and refresh fixtures return ``None`` for unavailable
-inputs; the consuming tests decide whether to skip. Malformed bundles, missing
-provenance, download, checkout, and lint failures remain failures. Refresh tests
-skip if the saved bundle has no revision to restore.
+without rebuilding.
+
+The archive must declare one public HTTPS source repository and a clean commit,
+tag, or ``git describe`` version. Missing or unavailable provenance fails the
+test; it does not fall back to the packed charm or a default branch. The source
+checkout must have the target charm at its root. Non-GitHub revisions are
+fetched directly first; only unresolved abbreviated revisions require scanning
+advertised refs, with blob filtering where supported by the Git server.
+The source fixture returns ``None`` if Git or the target release cannot be
+resolved, and the lint test decides to skip; source download and checkout errors
+otherwise fail the test.
+
+The refresh fixture returns ``None`` when the target or saved revision is
+unavailable, and the consuming refresh tests decide to skip. Malformed bundles,
+missing provenance, download, checkout, and lint failures remain failures.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap

@@ -79,6 +79,8 @@ class Catalog(CharmhubClient):
         self.last_platform = platform
         self.last_juju_version = juju_version
         self.last_revision = charm_revision
+        self.last_track = charm_track
+        self.last_risk = charm_risk
         for charm in self.charms:
             if (
                 charm.name == charm_name
@@ -97,7 +99,9 @@ class Catalog(CharmhubClient):
         return set()
 
 class CountingBuilder(BundleBuilder):
-    builds = 0
+    def __init__(self, charmhub_client: CharmhubClient):
+        super().__init__(charmhub_client=charmhub_client)
+        self.builds = 0
 
     def build(self, spec):
         self.builds += 1
@@ -243,15 +247,35 @@ def test_target_uses_the_exported_solution(pytester: pytest.Pytester, cmr: bool)
 
 
 @pytest.mark.parametrize(
-    ("selectors", "expected_revision", "requested_revision"),
+    ("selectors", "expected_revision", "requested_revision", "expected_track", "expected_risk"),
     [
-        pytest.param("    revision: 200\n    channel: 1/stable\n    base: ubuntu@22.04\n", 200, 200, id="pinned"),
-        pytest.param("    channel: 1/stable\n    base: ubuntu@22.04\n", 200, None, id="channel-and-base"),
-        pytest.param("", 100, None, id="charm-only"),
+        pytest.param(
+            "    revision: 200\n    channel: 1/stable\n    base: ubuntu@22.04\n",
+            200,
+            200,
+            "1",
+            "stable",
+            id="pinned",
+        ),
+        pytest.param(
+            "    channel: 1/stable\n    base: ubuntu@22.04\n",
+            200,
+            None,
+            "1",
+            "stable",
+            id="channel-and-base",
+        ),
+        pytest.param("", 100, None, None, None, id="charm-only"),
+        pytest.param("    channel: stable\n", 100, None, None, "stable", id="default-track"),
     ],
 )
 def test_resumed_run_uses_saved_target_selectors(
-    pytester: pytest.Pytester, selectors: str, expected_revision: int, requested_revision: int | None
+    pytester: pytest.Pytester,
+    selectors: str,
+    expected_revision: int,
+    requested_revision: int | None,
+    expected_track: str | None,
+    expected_risk: str | None,
 ) -> None:
     # GIVEN a saved bundle with an unpinned neighbor and optional target selectors
     bundle = pytester.path / "saved.yaml"
@@ -275,6 +299,8 @@ def test_resumed_run_uses_saved_target_selectors(
         def test_selected(target_resolved_charm, charmhub_client):
             assert target_resolved_charm.revision == {expected_revision}
             assert charmhub_client.last_revision == {requested_revision!r}
+            assert charmhub_client.last_track == {expected_track!r}
+            assert charmhub_client.last_risk == {expected_risk!r}
             assert charmhub_client.last_platform == "machine"
             assert charmhub_client.last_juju_version == JujuVersion.parse("3.6.29")
 
@@ -282,10 +308,7 @@ def test_resumed_run_uses_saved_target_selectors(
             if {requested_revision!r} is None:
                 assert target_resolved_charm_for_refresh is None
             else:
-                if {requested_revision!r} is None:
-                    assert target_resolved_charm_for_refresh is None
-                else:
-                    assert target_resolved_charm_for_refresh.revision == {expected_revision}
+                assert target_resolved_charm_for_refresh.revision == {expected_revision}
         """
     )
     if requested_revision is None:
@@ -330,7 +353,48 @@ def test_resumed_run_uses_saved_target_selectors(
     assert bundle.read_text() == original
 
 
-@pytest.mark.parametrize("revision", ["true", "-1", "'200'"])
+def test_unavailable_pinned_revision_returns_none(pytester: pytest.Pytester) -> None:
+    # GIVEN a resumed bundle pinned to a revision that Charmhub cannot resolve
+    bundle = pytester.path / "saved.yaml"
+    bundle.write_text("applications:\n  target:\n    charm: nrpe\n    revision: 999\n")
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + dedent("""
+        @pytest.fixture(scope="session")
+        def bundle_solution():
+            pytest.fail("A resumed run must not synthesize a replacement bundle")
+        """)
+    )
+    pytester.makepyfile(
+        """
+        def test_unavailable_release_is_not_resolved(target_resolved_charm, target_resolved_charm_for_refresh):
+            assert target_resolved_charm is None
+            assert target_resolved_charm_for_refresh is None
+        """
+    )
+
+    # WHEN resolving the saved target, THEN the fixtures expose unavailability to their consumers
+    result = pytester.runpytest(
+        "--current-state",
+        "deployed",
+        "--target-controller",
+        "existing",
+        "--target-model",
+        "existing",
+        "--target-application",
+        "target",
+        "--target-platform",
+        "machine",
+        "--target-bundle",
+        str(bundle),
+        "-q",
+    )
+
+    result.assert_outcomes(passed=1)
+
+
+@pytest.mark.parametrize("revision", ["true", "-1", "0", "'200'"])
 def test_resumed_bundle_rejects_invalid_revision(pytester: pytest.Pytester, revision: str) -> None:
     # GIVEN an existing bundle with a malformed explicit revision
     bundle: Path = pytester.path / "saved.yaml"
