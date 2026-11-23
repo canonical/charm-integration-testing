@@ -137,7 +137,10 @@ def repository(tmp_path: Path, logger: logging.Logger) -> tuple[Path, str]:
     return path, commit
 
 
-@pytest.mark.parametrize("version_format", ["{}", "{:.7}", "v1.0-2-g{:.7}", "v1.0"])
+@pytest.mark.parametrize(
+    "version_format",
+    ["{}", "{:.7}", "v1.0-2-g{:.7}", "v1.0", "refs/tags/v1.0"],
+)
 def test_checkout_uses_packed_revision(
     repository: tuple[Path, str],
     version_format: str,
@@ -236,6 +239,7 @@ def test_checkout_resolves_described_commit_from_advertised_ref(
         "Newer merge request",
     )
     git._run("-C", str(path), "update-ref", "refs/merge-requests/1/merge", "HEAD")
+    git._run("-C", str(path), "update-ref", f"refs/heads/{commit[:7]}", "HEAD")
     git._run("-C", str(path), "checkout", default_branch)
     git._run("-C", str(path), "branch", "-D", "merge-request")
     destination = tmp_path / "source"

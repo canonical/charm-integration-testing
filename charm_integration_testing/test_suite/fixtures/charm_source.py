@@ -79,6 +79,8 @@ def _read_source(archive: zipfile.ZipFile) -> _CharmSource:
 def _version_ref(version: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", version) or version.endswith("-dirty"):
         raise ValueError("Charm version must identify a clean Git commit, tag, or git-describe revision.")
+    if version.startswith("refs/tags/"):
+        return version
     described = re.fullmatch(r".+-\d+-g([0-9a-f]{7,40})", version)
     if described:
         return described[1]

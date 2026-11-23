@@ -50,35 +50,44 @@ class GitClient:
             self.logger.info("Checking out %s at revision %s.", repository, revision)
         is_tag = revision.startswith("refs/tags/")
         is_github_commit = urlsplit(repository).hostname == "github.com" and not is_tag
+        is_abbreviated_commit = re.fullmatch(r"[0-9a-f]{7,39}", revision) is not None
         if is_github_commit:
             revision = revision if len(revision) == 40 else self._resolve_github_commit(repository, revision)
+        self._run("init", "--quiet", str(destination))
         if is_tag or is_github_commit:
-            self._run("init", "--quiet", str(destination))
             self._fetch(repository, revision, destination)
             commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+        elif is_abbreviated_commit:
+            self._fetch_advertised_refs(repository, destination)
+            commit = self._run("-C", str(destination), "rev-parse", "--verify", f"{revision}^{{commit}}")
         else:
-            self._run("init", "--quiet", str(destination))
-            try:
-                self._fetch(repository, revision, destination)
-                commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
-            except CalledProcessError:
-                if re.fullmatch(r"[0-9a-f]{7,39}", revision):
-                    # Abbreviated SHAs are not fetchable as refs; filter out blobs while scanning advertised history.
-                    self._run(
-                        "-C",
-                        str(destination),
-                        "fetch",
-                        "--filter=blob:none",
-                        "--no-tags",
-                        "--",
-                        repository,
-                        "+refs/*:refs/cit-source/*",
-                    )
-                    commit = self._run("-C", str(destination), "rev-parse", "--verify", f"{revision}^{{commit}}")
-                else:
-                    raise
+            self._fetch(repository, revision, destination)
+            commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
         self._run("-C", str(destination), "checkout", "--detach", commit)
         return commit
+
+    def _fetch_advertised_refs(self, repository: str, destination: Path) -> None:
+        # Fetch to a private namespace so a remote ref cannot shadow the abbreviated object ID.
+        fetch_args = (
+            "-C",
+            str(destination),
+            "fetch",
+            "--filter=blob:none",
+            "--no-tags",
+            "--",
+            repository,
+            "+refs/*:refs/cit-source/*",
+        )
+        try:
+            self._run(*fetch_args)
+        except CalledProcessError as exc:
+            error = (exc.stderr or "").lower()
+            unsupported_filter = "filter" in error and any(
+                reason in error for reason in ("not support", "unsupported", "not recognized", "unknown capability")
+            )
+            if not unsupported_filter:
+                raise
+            self._run(*fetch_args[:3], *fetch_args[4:])
 
     def _fetch(self, repository: str, revision: str, destination: Path) -> None:
         self._run("-C", str(destination), "fetch", "--depth=1", "--no-tags", "--", repository, revision)
@@ -87,7 +96,12 @@ class GitClient:
         """Run a source checkout command without using the caller's global Git config."""
         return self._execute(
             ("-c", "credential.helper=", "-c", f"core.hooksPath={os.devnull}", *args),
-            env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"},
+            env={
+                **os.environ,
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+            },
         ).stdout.strip()
 
     def _resolve_github_commit(self, repository: str, revision: str) -> str:

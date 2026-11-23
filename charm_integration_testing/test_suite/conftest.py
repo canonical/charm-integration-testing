@@ -1598,7 +1598,7 @@ def record_pipeline_version_execution_metadata(
     git_client: GitClient | None,
 ) -> None:
     if git_client is None:
-        warnings.warn("Git is not installed; pipeline version metadata is unavailable.")
+        warnings.warn("Git is not installed; pipeline version metadata is unavailable.", stacklevel=2)
         return
     pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
     repository_path = str(request.config.rootpath)
@@ -1610,7 +1610,7 @@ def record_pipeline_version_execution_metadata(
     if repository_result.returncode == 0:
         execution_metadata("pipeline:ref", repository_result.stdout.strip())
     else:
-        warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}")
+        warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}", stacklevel=2)
 
     # Get repository tag if it exists
     if repository_result.returncode == 0:
@@ -1620,9 +1620,9 @@ def record_pipeline_version_execution_metadata(
         if repository_tag_result.returncode == 0:
             execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
         elif "no tag exactly matches" in repository_tag_result.stderr.lower():
-            warnings.warn("No tag exists in git repo pointing to this commit.")
+            warnings.warn("No tag exists in git repo pointing to this commit.", stacklevel=2)
         else:
-            warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}")
+            warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}", stacklevel=2)
     # Get pipeline workflow hash if file exists
     if pipeline_path.exists():
         pipeline_result = git_client.run(
@@ -1636,9 +1636,9 @@ def record_pipeline_version_execution_metadata(
         if pipeline_result.returncode == 0:
             execution_metadata("pipeline:workflow_hash", pipeline_result.stdout.strip())
         else:
-            warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
+            warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}", stacklevel=2)
     else:
-        warnings.warn(f"Pipeline file not found: {pipeline_path}")
+        warnings.warn(f"Pipeline file not found: {pipeline_path}", stacklevel=2)
 
 
 @pytest.fixture
