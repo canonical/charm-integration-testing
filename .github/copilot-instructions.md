@@ -6,6 +6,8 @@ Prioritize coding style and maintainability in Python changes.
 ## Development Workflow
 
 - Before implementing or reviewing repository changes, read this file and any matching files under `.github/instructions/`.
+- Keep GitHub Actions and workflow steps as thin wrappers around mise tasks. Put shared logic,
+  including input validation, in the mise tasks rather than duplicating it in GitHub Actions.
 - After making any significant code change (new functionality, bug fixes, refactors spanning more than a trivial edit), run the repository linter (`scripts/lint.sh`, or the specific `ruff`/`mypy` commands for the affected package) before considering the work done. Fix any issues the linter reports in the changed code.
 - When opening a pull request, follow the structure defined in `.github/pull_request_template.md` (Description, Resolved issues, Documentation, Tests) rather than an ad hoc format.
 
