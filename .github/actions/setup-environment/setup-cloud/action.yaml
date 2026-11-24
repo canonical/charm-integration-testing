@@ -62,19 +62,6 @@ runs:
       uses: ./.github/actions/get-environment-info
       with:
         environment_name: ${{ inputs.environment }}
-    - name: Check local cloud name
-      if: ${{ steps.info.outputs.setup-mode == 'local' }}
-      shell: bash
-      env:
-        CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
-        PLATFORM: ${{ steps.info.outputs.platform }}
-      run: |
-        # TODO: Use the role's requested API instead of the legacy slot platform
-        # when the scheduler supplies per-role features. See https://github.com/canonical/test-scheduler/pull/169
-        if [[ ( "${PLATFORM}" == kubernetes && "${CLOUD_NAME}" != local-k8s ) || ( "${PLATFORM}" == machine && "${CLOUD_NAME}" != localhost ) || ( "${PLATFORM}" != kubernetes && "${PLATFORM}" != machine ) ]]; then
-          echo "::error::Unexpected local cloud name '${CLOUD_NAME}' for platform '${PLATFORM}'."
-          exit 1
-        fi
     - name: Setup Remote Cloud
       id: setup-remote
       if: ${{ steps.info.outputs.setup-mode == 'remote' }}
@@ -93,6 +80,8 @@ runs:
       uses: ./.github/actions/setup-environment/setup-local
       with:
         features: ${{ inputs.features }}
+        cloud-name: ${{ steps.info.outputs.cloud-name }}
+        platform: ${{ steps.info.outputs.platform }}
     - name: Export cloud configuration
       id: result
       shell: bash

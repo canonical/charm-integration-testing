@@ -2,6 +2,12 @@
 name: Setup Local
 description: Provision local clouds and requested services on a disposable runner.
 inputs:
+  cloud-name:
+    description: Juju cloud name.
+    required: true
+  platform:
+    description: Platform for the selected slot.
+    required: true
   features:
     description: JSON list of requested services.
     required: false
@@ -16,6 +22,18 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Check local cloud name
+      shell: bash
+      env:
+        CLOUD_NAME: ${{ inputs.cloud-name }}
+        PLATFORM: ${{ inputs.platform }}
+      run: |
+        # TODO: Use the role's requested API instead of the legacy slot platform
+        # when the scheduler supplies per-role features. See https://github.com/canonical/test-scheduler/pull/169
+        if [[ ( "${PLATFORM}" == kubernetes && "${CLOUD_NAME}" != local-k8s ) || ( "${PLATFORM}" == machine && "${CLOUD_NAME}" != localhost ) || ( "${PLATFORM}" != kubernetes && "${PLATFORM}" != machine ) ]]; then
+          echo "::error::Unexpected local cloud name '${CLOUD_NAME}' for platform '${PLATFORM}'."
+          exit 1
+        fi
     - name: Provision local services
       id: provision
       shell: bash
