@@ -1,71 +1,45 @@
-# DRAFT proposal for SQT-1464: a structured, versioned run specification.
-#
-# The file says what to test. The environment and invocation supply placement,
-# architecture, Juju version, and credentials. S3 setup is configured outside
-# the pytest invocation. Charm feature requirements come from the bundle's charms.
-#
-# Shape: models, applications, and integrations from the bundle builder spec
-# (docs/reference/spec-file.rst), plus a `test` block. Model names are logical
-# identifiers; `remote_model` identifies a cross-model integration. Whether the
-# models share a controller is an environment decision.
-#
-# Proposed precedence: CLI flag > environment variable > this file > default.
-# No secrets or credentials are allowed in this file.
+# DRAFT proposal for SQT-1464. Environment, placement, architecture, Juju
+# version, S3 setup, and credentials are supplied outside this file.
 
 version: 1
 
-models:
-  - name: target
-    applications:
-      postgresql:
-        charm: postgresql-k8s
-        channel: 14/stable
-        revision: 468
-        base: ubuntu@22.04
-    integrations:
-      - application: postgresql
-        endpoint: database
-        remote_application: data-integrator
-        remote_endpoint: postgresql
-        remote_model: neighbor
-
-  - name: neighbor
-    applications:
-      data-integrator:
-        charm: data-integrator
-
-# What to test: the integration under test. Replaces --target-charm,
-# --target-application, --target-endpoint, --neighbor-application and
-# --neighbor-endpoint. Must match an integration declared above.
-test:
-  model: target
+# The target charm and endpoint under test.
+target:
+  charm: postgresql-k8s
   application: postgresql
   endpoint: database
-  remote_model: neighbor
-  remote_application: data-integrator
-  remote_endpoint: postgresql
-  downgrade-revision: 450 # optional; "default" lets Test Observer pick one
+  channel: 14/stable
+  revision: 468
+  series: "22.04"
+  downgrade_revision: 450
 
-# Pre-built variant (QUESTION: is this the right shape?)
-# ------------------------------------------------------
-# The dispatcher may build bundles before invoking pytest. A model may carry a
-# bundle_builder_x output bundle instead of `applications` and `integrations`.
-# The two forms are mutually exclusive per model.
+# The charm and endpoint integrated with the target.
+neighbor:
+  charm: data-integrator
+  application: data-integrator
+  endpoint: postgresql
+
+# Optional pre-built bundle-builder output. The target bundle contains both
+# applications for a single-model run; a cross-model run also needs a neighbor
+# bundle. Block scalars preserve multi-document bundles and their overlays.
 #
-#   - name: target
-#     bundle:
-#       applications: {postgresql: {charm: postgresql-k8s, ...}}
-#       relations: [...]
+# bundles:
+#   target: |
+#     bundle: kubernetes
+#     applications:
+#       postgresql:
+#         charm: postgresql-k8s
+#         channel: 14/stable
+#         revision: 468
+#         base: ubuntu@22.04
+#         scale: 1
+#       data-integrator:
+#         charm: data-integrator
+#         scale: 1
+#     relations:
+#       - ["postgresql:database", "data-integrator:postgresql"]
 #
-# If every model has `bundle`, the suite starts at `--current-state no_controller`
-# and skips test_build_bundle; otherwise it starts at `no_bundle` and builds.
-# Mixing the two forms in one spec is rejected. `test` is validated against the
-# bundles, and conflicts are rejected. During deployment, `test_deploy` has all
-# bundles and determines run-specific offer references.
-#
-# Open questions
-# --------------
-# - Should `bundle` also accept a relative path, or inline only?
-# - Short form for the common single-charm-against-one-neighbor case?
-# - Should the suite emit this file after test_build_bundle, so every run
-#   produces a reproduction spec?
+# Without bundles, the suite builds them. With all required bundles, it starts
+# at --current-state no_controller and skips test_build_bundle. Partial bundles
+# and conflicts with target or neighbor are rejected. test_deploy determines
+# run-specific offer references using all bundles.
