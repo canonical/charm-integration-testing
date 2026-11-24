@@ -16,7 +16,17 @@ from tenacity import before_sleep_log, retry, retry_if_exception, stop_after_att
 
 def _is_transient_network_error(error: BaseException) -> bool:
     if isinstance(error, requests.HTTPError):
-        return error.response is not None and error.response.status_code in {429, 500, 502, 503, 504}
+        response = error.response
+        if response is None:
+            return False
+        return response.status_code in {429, 500, 502, 503, 504} or (
+            response.status_code == 403
+            and (
+                response.headers.get("X-RateLimit-Remaining") == "0"
+                or "Retry-After" in response.headers
+                or "rate limit" in response.text.lower()
+            )
+        )
     if isinstance(error, requests.exceptions.SSLError):
         return False
     if isinstance(error, (requests.ConnectionError, requests.Timeout)):

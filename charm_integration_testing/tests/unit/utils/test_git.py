@@ -195,9 +195,11 @@ class LookupFailure:
     attempts: int
 
 
-def _http_error(status: int) -> requests.HTTPError:
+def _http_error(status: int, *, headers: dict[str, str] | None = None, body: str = "") -> requests.HTTPError:
     response = requests.Response()
     response.status_code = status
+    response.headers.update(headers or {})
+    response._content = body.encode()
     return requests.HTTPError(response=response)
 
 
@@ -207,9 +209,25 @@ def _http_error(status: int) -> requests.HTTPError:
         pytest.param(LookupFailure(requests.Timeout("Timed out"), 3), id="timeout"),
         pytest.param(LookupFailure(requests.ConnectionError("Connection reset"), 3), id="connection"),
         pytest.param(LookupFailure(_http_error(429), 3), id="rate-limit"),
+        pytest.param(
+            LookupFailure(_http_error(403, headers={"X-RateLimit-Remaining": "0"}), 3), id="primary-rate-limit"
+        ),
+        pytest.param(
+            LookupFailure(_http_error(403, headers={"Retry-After": "1"}), 3), id="secondary-rate-limit-header"
+        ),
+        pytest.param(
+            LookupFailure(_http_error(403, body='{"message": "API rate limit exceeded"}'), 3), id="rate-limit-message"
+        ),
+        pytest.param(
+            LookupFailure(_http_error(403, body='{"message": "You have exceeded a secondary rate limit."}'), 3),
+            id="secondary-rate-limit-message",
+        ),
         pytest.param(LookupFailure(_http_error(503), 3), id="server-error"),
         pytest.param(LookupFailure(_http_error(401), 1), id="authentication"),
         pytest.param(LookupFailure(_http_error(403), 1), id="forbidden"),
+        pytest.param(
+            LookupFailure(_http_error(403, headers={"X-RateLimit-Remaining": "10"}), 1), id="forbidden-with-quota"
+        ),
         pytest.param(LookupFailure(_http_error(404), 1), id="missing-commit"),
         pytest.param(LookupFailure(requests.exceptions.SSLError("Invalid certificate"), 1), id="certificate"),
     ],
