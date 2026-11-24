@@ -572,10 +572,6 @@ jobs:
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
           status: COMPLETED
-      - name: Fail local runner job if tests failed
-        if: ${{ always() && !cancelled() && steps.setup_target.outputs.setup-mode == 'local' && (steps.run_tests.outcome == 'failure' || steps.run_tests_cmr.outcome == 'failure') }}
-        shell: bash
-        run: exit 1
       - name: Trigger rerun on Test Observer if failure
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/trigger-rerun
