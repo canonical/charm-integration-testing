@@ -289,7 +289,7 @@ class CharmhubClient:
             config_defaults={k: v.default for k, v in config_schema.options.items()},
             resources=self._get_charm_resources(charm_name, channel, metadata, ubuntu_version),
             assumes=self._get_charm_assumes(charm_name, metadata, channel, ubuntu_version),
-            constraints=self._get_charm_constraints(charm_name, channel, ubuntu_version),
+            constraints=self._get_charm_constraints(charm_name, channel, ubuntu_version, metadata),
             ha_units=self.overrides_client.get_charm_ha_units(charm_name, channel, ubuntu_version),
             scale_down=self.overrides_client.get_charm_scale_down(charm_name, channel, ubuntu_version),
             platforms=self._get_charm_platforms(charm_name, channel, metadata, ubuntu_version),
@@ -858,7 +858,9 @@ class CharmhubClient:
             (EndpointType.PROVIDES, metadata.provides, "provides"),
         ):
             override_map = endpoint_overrides.get(endpoint_type, {})
-            stale = sorted(set(override_map) - set(metadata_map))
+            stale = sorted(
+                name for name, override in override_map.items() if name not in metadata_map and not override.if_present
+            )
             if stale:
                 raise UnparsableCharmException(
                     f"Charm {charm_name!r} override declares {label} endpoints not present in "
@@ -962,10 +964,21 @@ class CharmhubClient:
             )
         return resource_overrides
 
-    def _get_charm_constraints(self, charm_name: str, channel: CharmChannel, ubuntu_version: str) -> list[AnyExpr]:
+    def _get_charm_constraints(
+        self, charm_name: str, channel: CharmChannel, ubuntu_version: str, metadata: CharmMetadata
+    ) -> list[AnyExpr]:
         """Parse raw DSL constraint strings from overrides into typed AST nodes."""
+        texts = list(self.overrides_client.get_charm_constraints_overrides(charm_name, channel, ubuntu_version))
+        endpoint_overrides = self.overrides_client.get_charm_endpoint_overrides(charm_name, channel, ubuntu_version)
+        for endpoint_type, metadata_map in (
+            (EndpointType.REQUIRES, metadata.requires),
+            (EndpointType.PROVIDES, metadata.provides),
+        ):
+            for name, override in endpoint_overrides[endpoint_type].items():
+                if name in metadata_map:
+                    texts.extend(override.constraints)
         result: list[AnyExpr] = []
-        for text in self.overrides_client.get_charm_constraints_overrides(charm_name, channel, ubuntu_version):
+        for text in texts:
             expr = parse_constraint(text)
             if expr.dsl_type not in (DSLType.BOOL, DSLType.RUNTIME):
                 raise ValueError(

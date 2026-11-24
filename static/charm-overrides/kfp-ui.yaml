@@ -132,8 +132,12 @@ overrides:
       dashboard-links:
         optional: true
       ingress:
+        # Older pinned revisions still expose legacy SDI ingress; r2988 does not.
+        if_present: true
         optional: true
         features: [sdi-legacy]
+        constraints:
+          - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       istio-ingress-route:
         optional: true
       kfp-api:
@@ -143,7 +147,6 @@ overrides:
       service-mesh:
         optional: true
     constraints:
-      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
       - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
