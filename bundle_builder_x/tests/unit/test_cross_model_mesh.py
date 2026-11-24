@@ -9,8 +9,10 @@ same two charms, riding the same Juju offer.
 """
 
 import logging
+from pathlib import Path
 
 import pytest
+import yaml
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
@@ -71,6 +73,131 @@ def _mesh_pair_charms() -> tuple[Charm, Charm]:
         },
     )
     return consumer, provider
+
+
+@pytest.mark.parametrize(
+    ("charm_name", "block", "managed_endpoint"),
+    [
+        (name, block, endpoint)
+        for name, block, endpoints in (
+            ("opentelemetry-collector-k8s", 1, ("receive-loki-logs", "receive-traces", "receive-profiles")),
+            ("opentelemetry-collector-k8s", 2, ("receive-loki-logs", "receive-traces", "receive-profiles")),
+            ("grafana-k8s", 0, ("metrics-endpoint", "profiling-endpoint")),
+            ("alertmanager-k8s", 0, ("alerting", "grafana-source", "self-metrics-endpoint")),
+        )
+        for endpoint in endpoints
+    ],
+)
+@pytest.mark.parametrize(
+    ("workload", "service_mesh", "companion_peer", "expected"),
+    [
+        (True, False, None, z3.sat),
+        (True, True, None, z3.unsat),
+        (True, True, "remote-a", z3.sat),
+        (False, True, "remote-a", z3.unsat),
+        (True, True, "remote-b", z3.unsat),
+        (True, True, "local", z3.unsat),
+    ],
+    ids=("unmeshed", "missing-companion", "matched", "orphan", "wrong-peer", "local-companion"),
+)
+def test_conditional_mesh_override(
+    charm_name: str,
+    block: int,
+    managed_endpoint: str,
+    workload: bool,
+    service_mesh: bool,
+    companion_peer: str | None,
+    expected: z3.CheckSatResult,
+) -> None:
+    # GIVEN the actual mesh constraints and a provider with local and remote consumers
+    path = Path(__file__).parents[3] / "static" / "charm-overrides" / f"{charm_name}.yaml"
+    override = yaml.safe_load(path.read_text())
+    constraints = [expr for expr in override["overrides"][block]["constraints"] if "provide-cmr-mesh" in expr]
+    endpoints = {
+        "opentelemetry-collector-k8s": ("receive-loki-logs", "receive-traces", "receive-profiles"),
+        "grafana-k8s": ("metrics-endpoint", "profiling-endpoint"),
+        "alertmanager-k8s": ("alerting", "grafana-source", "self-metrics-endpoint"),
+    }[charm_name]
+    provider = _make_charm(
+        charm_name,
+        {
+            **{
+                endpoint: CharmEndpoint(type=EndpointType.PROVIDES, interface=endpoint, optional=True)
+                for endpoint in endpoints
+            },
+            "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh", optional=True),
+            "service-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="service_mesh", optional=True),
+        },
+    )
+    consumers = {
+        name: _make_charm(
+            name,
+            {
+                **{
+                    endpoint: CharmEndpoint(type=EndpointType.REQUIRES, interface=endpoint, optional=True)
+                    for endpoint in endpoints
+                },
+                "require-cmr-mesh": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="cross_model_mesh", optional=True
+                ),
+            },
+        )
+        for name in ("local", "remote-a", "remote-b")
+    }
+    beacon = _make_charm(
+        "beacon", {"service-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="service_mesh", optional=True)}
+    )
+    local_model, remote_model = ModelRef(name="local"), ModelRef(name="remote")
+    domain = _make_domain(
+        {
+            local_model: DomainModel(
+                arch="amd64",
+                platform="kubernetes",
+                juju_version=_JUJU,
+                applications={
+                    "provider": DomainApplication(charm=charm_name),
+                    "local": DomainApplication(charm="local"),
+                    "beacon": DomainApplication(charm="beacon"),
+                },
+            ),
+            remote_model: DomainModel(
+                arch="amd64",
+                platform="kubernetes",
+                juju_version=_JUJU,
+                applications={name: DomainApplication(charm=name) for name in ("remote-a", "remote-b")},
+            ),
+        }
+    )
+    provider_id = add_charm_to_domain(provider, domain, local_model)
+    beacon_id = add_charm_to_domain(beacon, domain, local_model)
+    consumer_ids = {
+        name: add_charm_to_domain(charm, domain, local_model if name == "local" else remote_model)
+        for name, charm in consumers.items()
+    }
+    pair_charms_in_domain(domain, provider_id, beacon_id)
+    for consumer_id in consumer_ids.values():
+        pair_charms_in_domain(domain, provider_id, consumer_id)
+
+    # WHEN the requested integrations and override constraints are applied
+    solver = z3.Solver()
+    add_constraints(solver, domain)
+    context = LoweringContext(charm_id=provider_id, domain_charm=domain.charms[provider_id], domain=domain)
+    solver.add(*(lower(parse_constraint(expr), context).expr for expr in constraints))
+    for integration in domain.charm_integrations:
+        if integration.provides_charm_id == beacon_id:
+            enabled = service_mesh
+        elif integration.provides_endpoint == "provide-cmr-mesh":
+            enabled = companion_peer is not None and integration.requires_charm_id == consumer_ids[companion_peer]
+        else:
+            enabled = (
+                workload
+                and integration.provides_endpoint == managed_endpoint
+                and integration.requires_charm_id == consumer_ids["remote-a"]
+            )
+        solver.add(integration.exists == enabled)
+
+    # THEN only valid companion configurations are satisfiable
+    assert solver.check() == expected
 
 
 class TestCrossModelExprDSL:
