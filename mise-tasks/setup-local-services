@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#MISE description="Provision local K8s, LXD and optionally S3 on a disposable runner"
+#MISE raw_args=true
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Usage: mise run setup-local-services -- --state DIR [--s3] [--output FILE]
+
+Provisions local services once per DIR, so repeated calls in one job reuse them and a later call can
+add S3.
+
+--state   Directory that records the services already provisioned
+--s3      Also provision the local S3 service
+--output  Append kubeconfig-path and, with --s3, s3-config-path as key=value lines
+USAGE
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+state=""
+s3=false
+output=""
+while (( $# )); do
+    case "$1" in
+        --state)
+            (( $# >= 2 )) || die "--state requires a value"
+            state="$2"
+            shift
+            ;;
+        --s3) s3=true ;;
+        --output)
+            (( $# >= 2 )) || die "--output requires a value"
+            output="$2"
+            shift
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *) die "Unknown argument: $1" ;;
+    esac
+    shift
+done
+[[ -n "${state}" ]] || die "--state is required"
+
+mkdir -p "${state}"
+# TODO: The scheduler does not yet request cloud APIs per role. Provision both substrates until it
+# can request only the services each role needs.
+# See https://github.com/canonical/test-scheduler/pull/169
+if [[ ! -f "${state}/k8s" || ! -f "${state}/lxd" || ( "${s3}" == true && ! -f "${state}/s3" ) ]]; then
+    groups=(--group local-k8s --group local-lxd)
+    if [[ "${s3}" == true ]]; then groups+=(--group local-s3); fi
+    mise run setup -- "${groups[@]}"
+fi
+if [[ ! -f "${state}/k8s" ]]; then
+    result="$(mktemp "${state}/k8s.XXXXXX")"
+    mise run setup-k8s -- --cloud-name local-k8s --kubeconfig "${state}/kubeconfig" --output "${result}"
+    mv "${result}" "${state}/k8s"
+fi
+if [[ ! -f "${state}/lxd" ]]; then
+    mise run setup-lxd
+    touch "${state}/lxd"
+fi
+if [[ "${s3}" == true && ! -f "${state}/s3" ]]; then
+    result="$(mktemp "${state}/s3.XXXXXX")"
+    mise run setup-s3 -- --output "${result}"
+    mv "${result}" "${state}/s3"
+fi
+if [[ -n "${output}" ]]; then
+    cat "${state}/k8s" >> "${output}"
+    if [[ "${s3}" == true ]]; then cat "${state}/s3" >> "${output}"; fi
+fi

@@ -62,6 +62,19 @@ runs:
       uses: ./.github/actions/get-environment-info
       with:
         environment_name: ${{ inputs.environment }}
+    - name: Check local cloud name
+      if: ${{ steps.info.outputs.setup-mode == 'local' }}
+      shell: bash
+      env:
+        CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
+        PLATFORM: ${{ steps.info.outputs.platform }}
+      run: |
+        # TODO: Use the role's requested API instead of the legacy slot platform
+        # when the scheduler supplies per-role features. See https://github.com/canonical/test-scheduler/pull/169
+        if [[ ( "${PLATFORM}" == kubernetes && "${CLOUD_NAME}" != local-k8s ) || ( "${PLATFORM}" == machine && "${CLOUD_NAME}" != localhost ) || ( "${PLATFORM}" != kubernetes && "${PLATFORM}" != machine ) ]]; then
+          echo "::error::Unexpected local cloud name '${CLOUD_NAME}' for platform '${PLATFORM}'."
+          exit 1
+        fi
     - name: Setup Remote Cloud
       id: setup-remote
       if: ${{ steps.info.outputs.setup-mode == 'remote' }}
@@ -74,16 +87,22 @@ runs:
         s3-secret-name: ${{ steps.info.outputs.s3-secret-name }}
         features: ${{ inputs.features }}
         cloud-name: ${{ steps.info.outputs.cloud-name }}
+    - name: Setup Local Cloud
+      id: setup-local
+      if: ${{ steps.info.outputs.setup-mode == 'local' }}
+      uses: ./.github/actions/setup-environment/setup-local
+      with:
+        features: ${{ inputs.features }}
     - name: Export cloud configuration
       id: result
       shell: bash
       env:
         CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
-        KUBECONFIG_PATH: ${{ steps.setup-remote.outputs.kubeconfig_path }}
+        KUBECONFIG_PATH: ${{ steps.setup-remote.outputs.kubeconfig_path || (steps.info.outputs.platform == 'kubernetes' && steps.setup-local.outputs.kubeconfig_path) || '' }}
         CLOUD_DEFINITION_PATH: ${{ steps.setup-remote.outputs.cloud-definition-path }}
         CLOUD_CREDENTIALS_PATH: ${{ steps.setup-remote.outputs.credentials-path }}
         METADATA_SOURCE: ${{ steps.setup-remote.outputs.metadata-source }}
-        S3_CONFIG_PATH: ${{ steps.setup-remote.outputs.s3-config-path }}
+        S3_CONFIG_PATH: ${{ steps.setup-remote.outputs.s3-config-path || steps.setup-local.outputs.s3-config-path }}
       run: |-  # zizmor: ignore[github-env] values are runner-created paths and cloud names from static/environments.yaml
         suffix="${CLOUD_NAME//-/_}"
         export_path() {

@@ -129,3 +129,27 @@ environments:
   ps7-sqa-prod_charm_qa_lxd-8: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-9: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-10: *ps7-sqa-prod_charm_qa_lxd
+  # TODO: Replace these role-specific slot IDs when the scheduler can reserve
+  # one local runner and pass the required cloud API for each role. See https://github.com/canonical/test-scheduler/pull/169
+  # GitHub-hosted runner environments
+  github-runner-k8s: &github-runner-k8s
+    github-runner: github-hosted-local
+    platform: kubernetes
+    setup-mode: local
+    cloud: local-k8s
+    arch: amd64
+  github-runner-k8s-2: *github-runner-k8s
+  github-runner-k8s-3: *github-runner-k8s
+  github-runner-k8s-4: *github-runner-k8s
+  github-runner-k8s-5: *github-runner-k8s
+  github-runner-lxd: &github-runner-lxd
+    github-runner: github-hosted-local
+    platform: machine
+    setup-mode: local
+    # Juju's built-in name for the local LXD cloud.
+    cloud: localhost
+    arch: amd64
+  github-runner-lxd-2: *github-runner-lxd
+  github-runner-lxd-3: *github-runner-lxd
+  github-runner-lxd-4: *github-runner-lxd
+  github-runner-lxd-5: *github-runner-lxd

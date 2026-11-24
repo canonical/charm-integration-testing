@@ -14,7 +14,7 @@ outputs:
     description: Architecture string (e.g. amd64).
     value: ${{ steps.lookup.outputs.arch }}
   setup-mode:
-    description: Cloud setup mode (remote).
+    description: Cloud setup mode (remote or local).
     value: ${{ steps.lookup.outputs.setup-mode }}
   cloud-name:
     description: Juju cloud name shared by every environment on the same cloud.
@@ -70,7 +70,7 @@ runs:
           "arch=\(.arch)",
           "setup-mode=\(.["setup-mode"])",
           "cloud-name=\(.cloud)",
-          "remote-service=\(.["remote-service"])",
+          "remote-service=\(.["remote-service"] // "")",
           "kubeconfig-secret=\(.["kubeconfig-secret"] // "")",
           "novarc-secret=\(.["novarc-secret"] // "")",
           "lxd-secret=\(.["lxd-secret"] // "")",
