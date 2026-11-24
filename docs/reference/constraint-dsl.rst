@@ -28,6 +28,33 @@ simultaneously.
    ``- 'features(endpoint[admin]) == {"admin"}'``
    ``- 'config[num-history-shards] in {1, 2, 4, 8}'``
 
+Endpoint-specific overrides and constraints
+------------------------------------------
+
+An endpoint override normally requires the named endpoint to exist in charm
+metadata. For endpoints removed in some supported revisions, explicitly set
+``if_present: true`` to apply the override only when the endpoint exists in the
+corresponding ``requires`` or ``provides`` section. This does not create an endpoint.
+
+Place constraints that depend on that endpoint inside its override:
+
+.. code-block:: yaml
+
+   requires:
+     ingress:
+       if_present: true
+       optional: true
+       features: [sdi-legacy]
+       constraints:
+         - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+
+These constraints use the same charm-wide DSL context as top-level constraints,
+but are included only when the endpoint exists in that direction in the metadata.
+``if_present`` defaults to false, so other stale endpoint overrides still raise an
+error. ``optional: true`` alone allows an existing endpoint to remain unconnected;
+it does not allow an absent endpoint in an override. Top-level constraints remain
+unconditional and are not automatically filtered for missing endpoint references.
+
 Z3 encoding
 -----------
 
