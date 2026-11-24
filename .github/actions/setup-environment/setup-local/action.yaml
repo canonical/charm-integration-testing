@@ -20,6 +20,30 @@ runs:
       id: provision
       shell: bash
       env:
-        S3_FLAG: ${{ contains(fromJSON(inputs.features), 's3-api') && '--s3' || '' }}
-      run: mise run setup-local-services -- --state "${RUNNER_TEMP}/local-cloud-services"
-        ${S3_FLAG} --output "${GITHUB_OUTPUT}"
+        SETUP_S3: ${{ contains(fromJSON(inputs.features), 's3-api') }}
+      run: |-
+        state="${RUNNER_TEMP}/local-cloud-services"
+        mkdir -p "${state}"
+        # TODO: Provision only the cloud APIs requested per role when the scheduler
+        # supports them. See https://github.com/canonical/test-scheduler/pull/169
+        if [[ ! -f "${state}/k8s" || ! -f "${state}/lxd" || ( "${SETUP_S3}" == true && ! -f "${state}/s3" ) ]]; then
+          groups=(--group local-k8s --group local-lxd)
+          if [[ "${SETUP_S3}" == true ]]; then groups+=(--group local-s3); fi
+          mise run setup -- "${groups[@]}"
+        fi
+        if [[ ! -f "${state}/k8s" ]]; then
+          result="$(mktemp "${state}/k8s.XXXXXX")"
+          mise run setup-k8s -- --cloud-name local-k8s --kubeconfig "${state}/kubeconfig" --output "${result}"
+          mv "${result}" "${state}/k8s"
+        fi
+        if [[ ! -f "${state}/lxd" ]]; then
+          mise run setup-lxd
+          touch "${state}/lxd"
+        fi
+        if [[ "${SETUP_S3}" == true && ! -f "${state}/s3" ]]; then
+          result="$(mktemp "${state}/s3.XXXXXX")"
+          mise run setup-s3 -- --output "${result}"
+          mv "${result}" "${state}/s3"
+        fi
+        cat "${state}/k8s" >> "${GITHUB_OUTPUT}"
+        if [[ "${SETUP_S3}" == true ]]; then cat "${state}/s3" >> "${GITHUB_OUTPUT}"; fi
