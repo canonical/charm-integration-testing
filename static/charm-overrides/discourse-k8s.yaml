@@ -1,42 +1,46 @@
 ---
 # Source: https://github.com/canonical/discourse-k8s-operator
-#
-# oauth (requires): optional - src/oauth_observer.py: OAuthObserver only builds
-# client_config when the relation exists (_generate_client_config); with no
-# relation, client_config stays None and get_oidc_env() returns {} (OIDC simply
-# disabled). SSO via OIDC is an additive integration, not the charm's primary
-# purpose (running Discourse), and the charm reaches active without it.
-# src/charm.py:_validate_configs() only blocks if the oauth relation *is*
-# present without force_https being true, mirroring the existing saml handling.
 overrides:
-  # Ubuntu 22.04 revisions support either Redis or Valkey.
+  # The latest 22.04 channels support either Redis or Valkey.
   - criteria:
+      - track: 'latest'
       - ubuntu_version: '22.04'
     configs: &configs
       external_hostname: ['discourse.example.com', null]
       force_https: [true, null]
+    provides: &observability
+      grafana-dashboard:
+        optional: true  # src/charm.py: GrafanaDashboardProvider is an optional integration.
+      metrics-endpoint:
+        optional: true  # src/charm.py: MetricsEndpointProvider is an optional integration.
     requires:
       # Discourse migrations create the vector extension.
       database:
         features: [plugin_vector]
-      redis:
-        optional: true  # src/charm.py::_are_relations_ready accepts Valkey instead.
-      valkey:
-        optional: true  # src/charm.py::_are_relations_ready accepts Redis instead.
-      oauth:
-        optional: true
+      logging: &logging
+        optional: true  # src/charm.py: LogProxyConsumer is an optional integration.
+      nginx-route: &nginx_route
+        optional: true  # src/charm.py::_are_relations_ready does not require ingress.
+      oauth: &oauth
+        optional: true  # src/oauth_observer.py::_generate_client_config handles no relation.
         features: [tls]
     constraints:
+      # src/charm.py::_are_relations_ready requires exactly one cache relation.
       - 'bool(endpoint[redis]) != bool(endpoint[valkey])'
       - 'bool(endpoint[database]) => "plugin_vector" in features(endpoint[database])'
       - 'bool(endpoint[saml]) => set(config[external_hostname])'
       - 'bool(endpoint[saml]) => set(config[force_https])'
       - 'bool(endpoint[oauth]) => set(config[force_https])'
-  - configs: *configs
+  # The latest 20.04 channels require Redis and have no Valkey endpoint.
+  - criteria:
+      - track: 'latest'
+      - ubuntu_version: '20.04'
+    configs: *configs
+    provides: *observability
     requires:
-      oauth:
-        optional: true
-        features: [tls]
+      logging: *logging
+      nginx-route: *nginx_route
+      oauth: *oauth
     constraints:
       - 'bool(endpoint[saml]) => set(config[external_hostname])'
       - 'bool(endpoint[saml]) => set(config[force_https])'
