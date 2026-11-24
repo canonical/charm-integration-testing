@@ -125,12 +125,15 @@ runs:
       run: |
         if [[ "${FOUND}" != "true" ]]; then
           mkdir -p "$(dirname "${RECORD}")"
+          temporary="$(mktemp "${RECORD}.XXXXXX")"
+          trap 'rm -f "${temporary}"' EXIT
           {
             echo "kubeconfig_path=${KUBECONFIG_PATH}"
             echo "cloud-definition-path=${CLOUD_DEFINITION_PATH}"
             echo "credentials-path=${CLOUD_CREDENTIALS_PATH}"
             echo "metadata-source=${METADATA_SOURCE}"
-          } > "${RECORD}"
+          } > "${temporary}"
+          mv "${temporary}" "${RECORD}"
         fi
         cat "${RECORD}" >> "$GITHUB_OUTPUT"
     - name: Write S3 configuration
@@ -154,6 +157,9 @@ runs:
             exit 1
           fi
         else
-          printf '%s' "${S3_CONFIG}" > "${path}"
+          temporary="$(mktemp "${path}.XXXXXX")"
+          trap 'rm -f "${temporary}"' EXIT
+          printf '%s' "${S3_CONFIG}" > "${temporary}"
+          mv "${temporary}" "${path}"
         fi
         echo "s3-config-path=${path}" >> "$GITHUB_OUTPUT"
