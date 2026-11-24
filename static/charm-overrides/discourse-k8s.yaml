@@ -8,7 +8,7 @@ overrides:
     configs: &configs
       external_hostname: ['discourse.example.com', null]
       force_https: [true, null]
-    provides: &observability
+    provides:
       grafana-dashboard:
         optional: true  # src/charm.py: GrafanaDashboardProvider is an optional integration.
       metrics-endpoint:
@@ -17,11 +17,11 @@ overrides:
       # Discourse migrations create the vector extension.
       database:
         features: [plugin_vector]
-      logging: &logging
+      logging:
         optional: true  # src/charm.py: LogProxyConsumer is an optional integration.
-      nginx-route: &nginx_route
+      nginx-route:
         optional: true  # src/charm.py::_are_relations_ready does not require ingress.
-      oauth: &oauth
+      oauth:
         optional: true  # src/oauth_observer.py::_generate_client_config handles no relation.
         features: [tls]
     constraints:
@@ -36,11 +36,19 @@ overrides:
       - track: 'latest'
       - ubuntu_version: '20.04'
     configs: *configs
-    provides: *observability
+    provides:
+      grafana-dashboard:
+        optional: true  # src/charm.py: GrafanaDashboardProvider is an optional integration.
+      metrics-endpoint:
+        optional: true  # src/charm.py: MetricsEndpointProvider is an optional integration.
     requires:
-      logging: *logging
-      nginx-route: *nginx_route
-      oauth: *oauth
+      logging:
+        optional: true  # src/charm.py: LogProxyConsumer is an optional integration.
+      nginx-route:
+        optional: true  # src/charm.py::_are_relations_ready does not require ingress.
+      oauth:
+        optional: true  # src/oauth_observer.py::_generate_client_config handles no relation.
+        features: [tls]
     constraints:
       - 'bool(endpoint[saml]) => set(config[external_hostname])'
       - 'bool(endpoint[saml]) => set(config[force_https])'
