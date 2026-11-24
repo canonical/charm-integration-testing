@@ -145,18 +145,9 @@ class CharmEndpoint(BaseModel):
     scope: EndpointScope | None = Field(default=None)
     cyclic: bool = Field(default=False)
     features: frozenset[str] = Field(default_factory=frozenset)
-    additive_features: frozenset[str] = Field(default_factory=frozenset)
     # Whether the remove-and-restore test may tear down this endpoint's integration. Charmhub has
     # no native concept of this today, so it is always override-sourced (see CharmEndpointOverrides).
     removable: bool = Field(default=True)
-
-    @model_validator(mode="after")
-    def validate_additive_features(self) -> "CharmEndpoint":
-        if self.additive_features and self.type != EndpointType.PROVIDES:
-            raise ValueError("Additive features are only supported on provides endpoints")
-        if not self.additive_features <= self.features:
-            raise ValueError("Additive features must also be declared as features")
-        return self
 
 
 class CharmEndpointProxy(BaseModel):

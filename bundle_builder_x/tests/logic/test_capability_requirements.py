@@ -17,19 +17,41 @@ is integrated.
     bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
 """
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.bundle_diagnostics import FeatureMismatchDiagnostic
 from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
+from bundle_builder_x.overrides import CharmOverrides
 from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
 from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
 
 
+@pytest.mark.parametrize(
+    ("postgresql", "track_index", "separator"),
+    [
+        ("postgresql-k8s", 0, "-"),
+        ("postgresql-k8s", 1, "_"),
+        ("postgresql", 0, "_"),
+        ("postgresql", 1, "_"),
+    ],
+)
 @pytest.mark.parametrize("with_proxy", [False, True])
-@pytest.mark.parametrize("with_request", [False, True])
-def test_additive_feature_with_shared_database(with_proxy: bool, with_request: bool) -> None:
+@pytest.mark.parametrize("requested", [False, True])
+def test_postgresql_plugin_overrides(
+    postgresql: str, track_index: int, separator: str, with_proxy: bool, requested: bool
+) -> None:
+    overrides_dir = Path(__file__).parents[3] / "static" / "charm-overrides"
+    pg_data = yaml.safe_load((overrides_dir / f"{postgresql}.yaml").read_text())
+    pg = CharmOverrides.model_validate(pg_data["overrides"][track_index])
+    proxy_name = "pgbouncer-k8s" if postgresql.endswith("-k8s") else "pgbouncer"
+    proxy_data = yaml.safe_load((overrides_dir / f"{proxy_name}.yaml").read_text())
+    proxy = CharmOverrides.model_validate(proxy_data["overrides"][-1])
+
     provider = make_charm(
         "provider",
         endpoints={
@@ -37,13 +59,12 @@ def test_additive_feature_with_shared_database(with_proxy: bool, with_request: b
                 type=EndpointType.PROVIDES,
                 interface="database",
                 optional=True,
-                features=frozenset({"vector"}),
-                additive_features=frozenset({"vector"}),
+                features=frozenset(pg.provides["database"].features),
             )
         },
-        configs={"vector": [True, None]},
-        config_defaults={"vector": False},
-        constraint_strs=['"vector" in features(endpoint[database]) => set(config[vector])'],
+        configs=pg.configs,
+        config_defaults={name: name == f"plugin{separator}audit{separator}enable" for name in pg.configs},
+        constraint_strs=[constraint for constraint in pg.constraints if "plugin" in constraint],
     )
     requester = make_charm(
         "requester",
@@ -51,119 +72,80 @@ def test_additive_feature_with_shared_database(with_proxy: bool, with_request: b
             "database": CharmEndpoint(
                 type=EndpointType.REQUIRES,
                 interface="database",
-                features=frozenset({"vector"}),
+                features=frozenset(
+                    {"vector", "postgis_tiger_geocoder", "pg_stat_statements", "bool_plperl", "earthdistance"}
+                )
+                if requested
+                else frozenset(),
             )
         },
-        constraint_strs=['bool(endpoint[database]) => "vector" in features(endpoint[database])'],
+        constraint_strs=[
+            'bool(endpoint[database]) => "vector" in features(endpoint[database])',
+            'bool(endpoint[database]) => "postgis_tiger_geocoder" in features(endpoint[database])',
+            'bool(endpoint[database]) => "pg_stat_statements" in features(endpoint[database])',
+            'bool(endpoint[database]) => "bool_plperl" in features(endpoint[database])',
+            'bool(endpoint[database]) => "earthdistance" in features(endpoint[database])',
+        ]
+        if requested
+        else [],
     )
-    client = make_charm(
-        "client",
-        endpoints={"database": CharmEndpoint(type=EndpointType.REQUIRES, interface="database")},
-    )
-    proxy = make_charm(
-        "proxy",
+    pooler = make_charm(
+        "pooler",
         endpoints={
             "database": CharmEndpoint(
                 type=EndpointType.PROVIDES,
                 interface="database",
                 optional=True,
-                features=frozenset({"vector"}),
-                additive_features=frozenset({"vector"}),
+                features=frozenset(proxy.provides["database"].features),
             ),
-            "backend": CharmEndpoint(
+            "backend-database": CharmEndpoint(
                 type=EndpointType.REQUIRES,
                 interface="database",
-                features=frozenset({"vector"}),
+                features=frozenset(proxy.requires["backend-database"].features),
             ),
         },
-        constraint_strs=['("vector" in features(endpoint[database])) == ("vector" in features(endpoint[backend]))'],
+        constraint_strs=[constraint for constraint in proxy.constraints if "backend-database])" in constraint],
     )
-    builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requester, client, proxy))
-    applications = {"provider": AppSpec(charm="provider"), "client": AppSpec(charm="client")}
-    database = "proxy" if with_proxy else "provider"
+    builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requester, pooler))
+    applications = {"provider": AppSpec(charm="provider"), "requester": AppSpec(charm="requester")}
+    database = "pooler" if with_proxy else "provider"
     integrations = [
         IntegrationSpec(
-            application="client", endpoint="database", remote_application=database, remote_endpoint="database"
+            application="requester", endpoint="database", remote_application=database, remote_endpoint="database"
         )
     ]
     if with_proxy:
-        applications["proxy"] = AppSpec(charm="proxy")
+        applications["pooler"] = AppSpec(charm="pooler")
         integrations.append(
             IntegrationSpec(
-                application="proxy", endpoint="backend", remote_application="provider", remote_endpoint="database"
-            )
-        )
-    if with_request:
-        applications["requester"] = AppSpec(charm="requester")
-        integrations.append(
-            IntegrationSpec(
-                application="requester", endpoint="database", remote_application=database, remote_endpoint="database"
+                application="pooler",
+                endpoint="backend-database",
+                remote_application="provider",
+                remote_endpoint="database",
             )
         )
 
     bundle = build_single_model(builder, applications, integrations)
-
-    assert bundle.applications["provider"].config.get("vector", False) is with_request
-
-
-def test_additive_feature_with_cross_model_request() -> None:
-    provider = make_charm(
-        "provider",
-        endpoints={
-            "database": CharmEndpoint(
-                type=EndpointType.PROVIDES,
-                interface="database",
-                optional=True,
-                features=frozenset({"vector"}),
-                additive_features=frozenset({"vector"}),
-            )
-        },
-        configs={"vector": [True, None]},
-        config_defaults={"vector": False},
-        constraint_strs=['"vector" in features(endpoint[database]) => set(config[vector])'],
+    config = bundle.applications["provider"].config
+    for extension in (
+        "vector",
+        "postgis_tiger_geocoder",
+        "postgis",
+        "fuzzystrmatch",
+        "bool_plperl",
+        "plperl",
+        "earthdistance",
+        "cube",
+    ):
+        key = f"plugin{separator}{extension.replace('_', separator)}{separator}enable"
+        assert config.get(key, False) is requested
+    stat_key = (
+        "plugin-pg-stat-statements-enable"
+        if postgresql == "postgresql" and track_index == 0
+        else f"plugin{separator}pg{separator}stat{separator}statements{separator}enable"
     )
-    requester = make_charm(
-        "requester",
-        endpoints={
-            "database": CharmEndpoint(
-                type=EndpointType.REQUIRES,
-                interface="database",
-                features=frozenset({"vector"}),
-            )
-        },
-        constraint_strs=['bool(endpoint[database]) => "vector" in features(endpoint[database])'],
-    )
-    builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requester))
-    solution = build_multi_model(
-        builder,
-        [
-            ModelSpec(
-                name="requester",
-                controller="k8s",
-                juju=JUJU_VERSION,
-                applications={"requester": AppSpec(charm="requester")},
-                integrations=[
-                    IntegrationSpec(
-                        application="requester",
-                        endpoint="database",
-                        remote_model="provider",
-                        remote_controller="k8s",
-                        remote_application="provider",
-                        remote_endpoint="database",
-                    )
-                ],
-            ),
-            ModelSpec(
-                name="provider",
-                controller="k8s",
-                juju=JUJU_VERSION,
-                applications={"provider": AppSpec(charm="provider")},
-            ),
-        ],
-    )
-
-    bundle = next(bundle for bundle in solution.bundles if "provider" in bundle.applications)
-    assert bundle.applications["provider"].config["vector"] is True
+    assert config.get(stat_key, False) is requested
+    assert not config.get(f"plugin{separator}unaccent{separator}enable", False)
 
 
 class TestCapabilityRequirements:

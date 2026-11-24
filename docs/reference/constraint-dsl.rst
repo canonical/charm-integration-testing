@@ -282,8 +282,7 @@ Endpoint feature set
    features(RelationSet)       ->  Set[Str]
 
 The set of distinct features active across all relations on the named endpoint.
-Features must be declared in an endpoint's ``features:`` or ``additive_features:``
-list in overrides; this
+Features must be declared in an endpoint's ``features:`` list in overrides; this
 closed-world declaration is what allows features to be encoded as ``z3.Bool`` variables
 rather than Z3 string variables.
 
@@ -319,12 +318,6 @@ forced inactive, and a feature declared on both sides must agree. This
 prevents pairing charms whose feature sets don't overlap. Failures are
 reported via ``INTEGRATION_FEATURE_MISMATCH`` and
 ``FeatureMismatchDiagnostic`` values in ``UncompletableBundleError.diagnostics``.
-
-For provider capabilities that can be enabled for one consumer without requiring
-every other consumer to declare them, use ``additive_features:`` on the provides
-endpoint. Such a feature is active if any connected consumer requests it; consumers
-that do not declare it remain compatible. The requiring endpoint declares it under
-``features:`` and uses a constraint to request it. This also applies across models.
 
 Config value
 ~~~~~~~~~~~~
