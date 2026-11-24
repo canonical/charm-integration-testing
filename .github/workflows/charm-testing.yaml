@@ -120,8 +120,7 @@ jobs:
       TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
       NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
       BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
-      # Services to set up on each cloud. Everything is set up until the scheduler
-      # requests features per run.
+      # TODO: Replace with per-role feature requests from the scheduler. See https://github.com/canonical/test-scheduler/pull/169
       CLOUD_FEATURES: '["s3-api"]'
     steps:
       - name: Clone Repo
