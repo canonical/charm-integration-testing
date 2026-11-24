@@ -29,7 +29,7 @@ simultaneously.
    ``- 'config[num-history-shards] in {1, 2, 4, 8}'``
 
 Endpoint-specific overrides and constraints
-------------------------------------------
+-------------------------------------------
 
 An endpoint override normally requires the named endpoint to exist in charm
 metadata. For endpoints removed in some supported revisions, explicitly set
