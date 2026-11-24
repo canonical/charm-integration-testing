@@ -1,0 +1,90 @@
+---
+name: Setup Remote Cloud
+description: Prepare access to an existing cloud.
+inputs:
+  cloud-name:
+    description: Juju cloud name.
+    required: true
+  kubeconfig-secret:
+    description: Name of the Kubernetes credentials secret.
+    required: false
+    default: ''
+  novarc-secret:
+    description: Name of the OpenStack credentials secret.
+    required: false
+    default: ''
+  lxd-secret:
+    description: Name of the remote LXD credentials secret.
+    required: false
+    default: ''
+  workspace:
+    description: Directory for cloud configuration.
+    required: true
+outputs:
+  kubeconfig_path:
+    description: Path to the Kubernetes kubeconfig.
+    value: ${{ steps.k8s.outputs.kubeconfig_path }}
+  cloud-definition-path:
+    description: Path to the Juju cloud definition.
+    value: ${{ steps.o7k.outputs.cloud-definition-path || steps.lxd.outputs.cloud-definition-path }}
+  credentials-path:
+    description: Path to Juju credentials.
+    value: ${{ steps.o7k.outputs.credentials-path || steps.lxd.outputs.credentials-path }}
+  metadata-source:
+    description: Path to OpenStack image metadata.
+    value: ${{ steps.o7k.outputs.metadata-source }}
+runs:
+  using: composite
+  steps:
+    - name: Check remote credentials
+      shell: bash
+      env:
+        KUBECONFIG_SECRET: ${{ inputs.kubeconfig-secret }}
+        NOVARC_SECRET: ${{ inputs.novarc-secret }}
+        LXD_SECRET: ${{ inputs.lxd-secret }}
+        KUBECONFIG_CONTENT: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.kubeconfig-secret)] }}
+        NOVARC: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.novarc-secret)] }}
+        LXD_CREDENTIALS: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.lxd-secret)] }}
+        CLOUD_NAME: ${{ inputs.cloud-name }}
+      run: |
+        count=0
+        for secret in "${KUBECONFIG_SECRET}" "${NOVARC_SECRET}" "${LXD_SECRET}"; do
+          if [[ -n "${secret}" ]]; then count=$((count + 1)); fi
+        done
+        if [[ "${count}" != 1 ]]; then
+          echo "::error::Expected exactly one credential field for Juju cloud '${CLOUD_NAME}'."
+          exit 1
+        fi
+        if [[ ( -n "${KUBECONFIG_SECRET}" && -z "${KUBECONFIG_CONTENT}" ) || ( -n "${NOVARC_SECRET}" && -z "${NOVARC}" ) || ( -n "${LXD_SECRET}" && -z "${LXD_CREDENTIALS}" ) ]]; then
+          echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'."
+          exit 1
+        fi
+    - name: Setup Kubernetes
+      id: k8s
+      # TODO: When the scheduler supplies per-role features, pass them here and
+      # replace the credential-field condition with (see https://github.com/canonical/test-scheduler/pull/169):
+      # if: ${{ contains(fromJSON(inputs.features), 'k8s-api') }}
+      if: ${{ inputs.kubeconfig-secret != '' }}
+      uses: ./.github/actions/setup-environment/setup-k8s
+      with:
+        kubeconfig: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.kubeconfig-secret)] }}
+        cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ inputs.workspace }}
+    - name: Setup OpenStack
+      id: o7k
+      # TODO: if: ${{ contains(fromJSON(inputs.features), 'o7k-api') }} (see https://github.com/canonical/test-scheduler/pull/169)
+      if: ${{ inputs.novarc-secret != '' }}
+      uses: ./.github/actions/setup-environment/setup-openstack
+      with:
+        novarc: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.novarc-secret)] }}
+        cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ inputs.workspace }}
+    - name: Setup LXD
+      id: lxd
+      # TODO: if: ${{ contains(fromJSON(inputs.features), 'lxd-api') }} (see https://github.com/canonical/test-scheduler/pull/169)
+      if: ${{ inputs.lxd-secret != '' }}
+      uses: ./.github/actions/setup-environment/setup-lxd
+      with:
+        lxd-creds: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.lxd-secret)] }}
+        cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ inputs.workspace }}

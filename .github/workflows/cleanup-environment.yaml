@@ -104,7 +104,9 @@ jobs:
         id: creds
         shell: bash
         env:
-          CREDENTIALS_SECRET_NAME: ${{ steps.env_info.outputs.credentials-secret }}
+          KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
+          NOVARC_SECRET_NAME: ${{ steps.env_info.outputs.novarc-secret }}
+          LXD_SECRET_NAME: ${{ steps.env_info.outputs.lxd-secret }}
           CLOUD_TYPE: ${{ steps.env_info.outputs.cloud-type }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
@@ -118,11 +120,21 @@ jobs:
             echo "::error::AGE_THRESHOLD must be a finite number greater than zero"
             exit 1
           fi
-          if [[ "${CLOUD_TYPE}" == "k8s" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+          if [[ "${CLOUD_TYPE}" == remote ]]; then
+            count=0
+            for secret in "${KUBECONFIG_SECRET_NAME}" "${NOVARC_SECRET_NAME}" "${LXD_SECRET_NAME}"; do
+              if [[ -n "${secret}" ]]; then count=$((count + 1)); fi
+            done
+            if [[ "${count}" != 1 ]]; then
+              echo "::error::Expected exactly one remote cloud credential field."
+              exit 1
+            fi
+          fi
+          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
             echo "kubernetes=true" >> $GITHUB_OUTPUT
-            echo "${!CREDENTIALS_SECRET_NAME}" > "kubeconfig"
+            echo "${!KUBECONFIG_SECRET_NAME}" > "kubeconfig"
             echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
-          elif [[ "${CLOUD_TYPE}" == "o7k" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+          elif [[ -n "${NOVARC_SECRET_NAME}" ]]; then
             echo "openstack=true" >> $GITHUB_OUTPUT
             # Extract environment variables from the RC file
             while IFS= read -r line; do
@@ -137,13 +149,13 @@ jobs:
                   echo "::add-mask::$value"
                   echo "$key=$value" >> $GITHUB_ENV
                 fi
-            done <<< "${!CREDENTIALS_SECRET_NAME}"
-          elif [[ "${CLOUD_TYPE}" == "lxd" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+            done <<< "${!NOVARC_SECRET_NAME}"
+          elif [[ -n "${LXD_SECRET_NAME}" ]]; then
             echo "lxd=true" >> "$GITHUB_OUTPUT"
             umask 077
             LXD_CREDENTIALS_DIR="${RUNNER_TEMP}/lxd-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             mkdir -p "$LXD_CREDENTIALS_DIR"
-            printf '%s\n' "${!CREDENTIALS_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
+            printf '%s\n' "${!LXD_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
             echo "LXD_CREDENTIALS_DIR=$LXD_CREDENTIALS_DIR" >> "$GITHUB_ENV"
           fi
       ##################################################################################

@@ -49,7 +49,7 @@ outputs:
     description: Path to the Juju credentials (non-Kubernetes clouds only).
     value: ${{ steps.result.outputs.credentials-path }}
   metadata-source:
-    description: Path to image metadata (o7k only).
+    description: Path to image metadata (OpenStack only).
     value: ${{ steps.result.outputs.metadata-source }}
   s3-config-path:
     description: Path to the S3 configuration, when s3-api is requested and available.
@@ -73,14 +73,6 @@ runs:
         if [[ -f "${record}" ]]; then
           echo "found=true" >> "$GITHUB_OUTPUT"
         fi
-    - name: Report missing remote cloud credentials
-      if: ${{ steps.existing.outputs.found != 'true' && env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] == '' }}
-      shell: bash
-      env:
-        CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
-      run: |
-        echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'."
-        exit 1
     - name: Create cloud workspace
       id: workspace
       if: ${{ steps.existing.outputs.found != 'true' }}
@@ -88,28 +80,14 @@ runs:
       run: |
         workspace="$(mktemp -d "${RUNNER_TEMP}/juju-cloud.XXXXXX")"
         echo "path=${workspace}" >> "$GITHUB_OUTPUT"
-    - name: Setup K8s Cloud
-      id: setup-k8s
-      if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'k8s' }}
-      uses: ./.github/actions/setup-environment/setup-k8s
+    - name: Setup Remote Cloud
+      id: setup-remote
+      if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'remote' }}
+      uses: ./.github/actions/setup-environment/setup-remote
       with:
-        kubeconfig: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] }}
-        cloud-name: ${{ steps.info.outputs.cloud-name }}
-        workspace: ${{ steps.workspace.outputs.path }}
-    - name: Setup OpenStack Cloud
-      id: setup-o7k
-      if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'o7k' }}
-      uses: ./.github/actions/setup-environment/setup-openstack
-      with:
-        novarc: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] }}
-        cloud-name: ${{ steps.info.outputs.cloud-name }}
-        workspace: ${{ steps.workspace.outputs.path }}
-    - name: Setup LXD Cloud
-      id: setup-lxd
-      if: ${{ steps.existing.outputs.found != 'true' && steps.info.outputs.cloud-type == 'lxd' }}
-      uses: ./.github/actions/setup-environment/setup-lxd
-      with:
-        lxd-creds: ${{ env[format('SETUP_CLOUD_SECRET_{0}', steps.info.outputs.credentials-secret)] }}
+        kubeconfig-secret: ${{ steps.info.outputs.kubeconfig-secret }}
+        novarc-secret: ${{ steps.info.outputs.novarc-secret }}
+        lxd-secret: ${{ steps.info.outputs.lxd-secret }}
         cloud-name: ${{ steps.info.outputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
     - name: Write S3 configuration
@@ -143,10 +121,10 @@ runs:
         FOUND: ${{ steps.existing.outputs.found }}
         RECORD: ${{ steps.existing.outputs.record }}
         CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
-        KUBECONFIG_PATH: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
-        CLOUD_DEFINITION_PATH: ${{ steps.setup-o7k.outputs.cloud-definition-path || steps.setup-lxd.outputs.cloud-definition-path }}
-        CLOUD_CREDENTIALS_PATH: ${{ steps.setup-o7k.outputs.credentials-path || steps.setup-lxd.outputs.credentials-path }}
-        METADATA_SOURCE: ${{ steps.setup-o7k.outputs.metadata-source }}
+        KUBECONFIG_PATH: ${{ steps.setup-remote.outputs.kubeconfig_path }}
+        CLOUD_DEFINITION_PATH: ${{ steps.setup-remote.outputs.cloud-definition-path }}
+        CLOUD_CREDENTIALS_PATH: ${{ steps.setup-remote.outputs.credentials-path }}
+        METADATA_SOURCE: ${{ steps.setup-remote.outputs.metadata-source }}
         S3_CONFIG_PATH: ${{ steps.s3.outputs.s3-config-path }}
       run: |-  # zizmor: ignore[github-env] values are runner-created paths and cloud names from static/environments.yaml
         if [[ "${FOUND}" != "true" ]]; then
