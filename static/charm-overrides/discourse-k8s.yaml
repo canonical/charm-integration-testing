@@ -18,7 +18,7 @@ overrides:
     requires:
       # Discourse migrations create the vector extension.
       database:
-        features: [vector]
+        features: [plugin_vector]
       redis:
         optional: true  # src/charm.py::_are_relations_ready accepts Valkey instead.
       valkey:
@@ -28,7 +28,7 @@ overrides:
         features: [tls]
     constraints:
       - 'bool(endpoint[redis]) != bool(endpoint[valkey])'
-      - 'bool(endpoint[database]) => "vector" in features(endpoint[database])'
+      - 'bool(endpoint[database]) => "plugin_vector" in features(endpoint[database])'
       - 'bool(endpoint[saml]) => set(config[external_hostname])'
       - 'bool(endpoint[saml]) => set(config[force_https])'
       - 'bool(endpoint[oauth]) => set(config[force_https])'

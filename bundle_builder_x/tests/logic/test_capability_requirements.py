@@ -32,6 +32,25 @@ from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build
 
 
 @pytest.mark.parametrize(
+    ("postgresql", "pgbouncer"),
+    [("postgresql-k8s", "pgbouncer-k8s"), ("postgresql", "pgbouncer")],
+)
+def test_postgresql_plugin_feature_names_match_proxy(postgresql: str, pgbouncer: str) -> None:
+    overrides_dir = Path(__file__).parents[3] / "static" / "charm-overrides"
+    pg_data = yaml.safe_load((overrides_dir / f"{postgresql}.yaml").read_text())
+    proxy_data = yaml.safe_load((overrides_dir / f"{pgbouncer}.yaml").read_text())
+    proxy = CharmOverrides.model_validate(proxy_data["overrides"][-1])
+    backend_features = set(proxy.requires["backend-database"].features)
+
+    assert backend_features
+    assert all(feature.startswith("plugin_") for feature in backend_features)
+    assert set(proxy.provides["database"].features) - {"tls"} == backend_features
+    for data in pg_data["overrides"][:2]:
+        pg = CharmOverrides.model_validate(data)
+        assert set(pg.provides["database"].features) - {"tls"} == backend_features
+
+
+@pytest.mark.parametrize(
     ("postgresql", "track_index", "separator"),
     [
         ("postgresql-k8s", 0, "-"),
@@ -73,18 +92,24 @@ def test_postgresql_plugin_overrides(
                 type=EndpointType.REQUIRES,
                 interface="database",
                 features=frozenset(
-                    {"vector", "postgis_tiger_geocoder", "pg_stat_statements", "bool_plperl", "earthdistance"}
+                    {
+                        "plugin_vector",
+                        "plugin_postgis_tiger_geocoder",
+                        "plugin_pg_stat_statements",
+                        "plugin_bool_plperl",
+                        "plugin_earthdistance",
+                    }
                 )
                 if requested
                 else frozenset(),
             )
         },
         constraint_strs=[
-            'bool(endpoint[database]) => "vector" in features(endpoint[database])',
-            'bool(endpoint[database]) => "postgis_tiger_geocoder" in features(endpoint[database])',
-            'bool(endpoint[database]) => "pg_stat_statements" in features(endpoint[database])',
-            'bool(endpoint[database]) => "bool_plperl" in features(endpoint[database])',
-            'bool(endpoint[database]) => "earthdistance" in features(endpoint[database])',
+            'bool(endpoint[database]) => "plugin_vector" in features(endpoint[database])',
+            'bool(endpoint[database]) => "plugin_postgis_tiger_geocoder" in features(endpoint[database])',
+            'bool(endpoint[database]) => "plugin_pg_stat_statements" in features(endpoint[database])',
+            'bool(endpoint[database]) => "plugin_bool_plperl" in features(endpoint[database])',
+            'bool(endpoint[database]) => "plugin_earthdistance" in features(endpoint[database])',
         ]
         if requested
         else [],

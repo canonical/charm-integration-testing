@@ -8,14 +8,18 @@ overrides:
       database:
         optional: true
         # Extension provisioning through PgBouncer is blocked by https://github.com/canonical/pgbouncer-k8s-operator/issues/877
-        features: [tls, address_standardizer, address_standardizer_data_us, pgaudit,
-          bloom, bool_plperl, btree_gin, btree_gist, citext, cube, debversion, dict_int,
-          dict_xsyn, earthdistance, fuzzystrmatch, hll, hstore, hypopg, icu_ext, intarray,
-          ip4r, isn, jsonb_plperl, lo, ltree, old_snapshot, orafce, pg_freespacemap,
-          pg_similarity, pg_stat_statements, pg_trgm, pg_visibility, pgrowlocks, pgstattuple,
-          plperl, plpython3u, pltcl, postgis, postgis_raster, postgis_tiger_geocoder,
-          postgis_topology, prefix, rdkit, seg, spi, tablefunc, tcn, tds_fdw, timescaledb,
-          tsm_system_rows, tsm_system_time, unaccent, uuid-ossp, vector]
+        features: [tls, plugin_address_standardizer, plugin_address_standardizer_data_us,
+          plugin_pgaudit, plugin_bloom, plugin_bool_plperl, plugin_btree_gin, plugin_btree_gist,
+          plugin_citext, plugin_cube, plugin_debversion, plugin_dict_int, plugin_dict_xsyn,
+          plugin_earthdistance, plugin_fuzzystrmatch, plugin_hll, plugin_hstore, plugin_hypopg,
+          plugin_icu_ext, plugin_intarray, plugin_ip4r, plugin_isn, plugin_jsonb_plperl,
+          plugin_lo, plugin_ltree, plugin_old_snapshot, plugin_orafce, plugin_pg_freespacemap,
+          plugin_pg_similarity, plugin_pg_stat_statements, plugin_pg_trgm, plugin_pg_visibility,
+          plugin_pgrowlocks, plugin_pgstattuple, plugin_plperl, plugin_plpython3u,
+          plugin_pltcl, plugin_postgis, plugin_postgis_raster, plugin_postgis_tiger_geocoder,
+          plugin_postgis_topology, plugin_prefix, plugin_rdkit, plugin_seg, plugin_spi,
+          plugin_tablefunc, plugin_tcn, plugin_tds_fdw, plugin_timescaledb, plugin_tsm_system_rows,
+          plugin_tsm_system_time, plugin_unaccent, plugin_uuid-ossp, plugin_vector]
       db:
         optional: true
         features: [tls]
@@ -24,14 +28,18 @@ overrides:
         features: [tls]
     requires:
       backend-database:
-        features: [address_standardizer, address_standardizer_data_us, pgaudit, bloom,
-          bool_plperl, btree_gin, btree_gist, citext, cube, debversion, dict_int,
-          dict_xsyn, earthdistance, fuzzystrmatch, hll, hstore, hypopg, icu_ext, intarray,
-          ip4r, isn, jsonb_plperl, lo, ltree, old_snapshot, orafce, pg_freespacemap,
-          pg_similarity, pg_stat_statements, pg_trgm, pg_visibility, pgrowlocks, pgstattuple,
-          plperl, plpython3u, pltcl, postgis, postgis_raster, postgis_tiger_geocoder,
-          postgis_topology, prefix, rdkit, seg, spi, tablefunc, tcn, tds_fdw, timescaledb,
-          tsm_system_rows, tsm_system_time, unaccent, uuid-ossp, vector]
+        features: [plugin_address_standardizer, plugin_address_standardizer_data_us,
+          plugin_pgaudit, plugin_bloom, plugin_bool_plperl, plugin_btree_gin, plugin_btree_gist,
+          plugin_citext, plugin_cube, plugin_debversion, plugin_dict_int, plugin_dict_xsyn,
+          plugin_earthdistance, plugin_fuzzystrmatch, plugin_hll, plugin_hstore, plugin_hypopg,
+          plugin_icu_ext, plugin_intarray, plugin_ip4r, plugin_isn, plugin_jsonb_plperl,
+          plugin_lo, plugin_ltree, plugin_old_snapshot, plugin_orafce, plugin_pg_freespacemap,
+          plugin_pg_similarity, plugin_pg_stat_statements, plugin_pg_trgm, plugin_pg_visibility,
+          plugin_pgrowlocks, plugin_pgstattuple, plugin_plperl, plugin_plpython3u,
+          plugin_pltcl, plugin_postgis, plugin_postgis_raster, plugin_postgis_tiger_geocoder,
+          plugin_postgis_topology, plugin_prefix, plugin_rdkit, plugin_seg, plugin_spi,
+          plugin_tablefunc, plugin_tcn, plugin_tds_fdw, plugin_timescaledb, plugin_tsm_system_rows,
+          plugin_tsm_system_time, plugin_unaccent, plugin_uuid-ossp, plugin_vector]
       certificates:
         optional: true
     constraints:
@@ -43,71 +51,99 @@ overrides:
       - '"tls" in features(endpoint[db]) => bool(endpoint[certificates])'
       # If db-admin endpoint uses tls mode, certificates is required
       - '"tls" in features(endpoint[db-admin]) => bool(endpoint[certificates])'
-      - '("address_standardizer" in features(endpoint[database])) == ("address_standardizer"
+      - '("plugin_address_standardizer" in features(endpoint[database])) == ("plugin_address_standardizer"
         in features(endpoint[backend-database]))'
-      - '("address_standardizer_data_us" in features(endpoint[database])) == ("address_standardizer_data_us"
-        in features(endpoint[backend-database]))'
-      - '("pgaudit" in features(endpoint[database])) == ("pgaudit" in features(endpoint[backend-database]))'
-      - '("bloom" in features(endpoint[database])) == ("bloom" in features(endpoint[backend-database]))'
-      - '("bool_plperl" in features(endpoint[database])) == ("bool_plperl" in features(endpoint[backend-database]))'
-      - '("btree_gin" in features(endpoint[database])) == ("btree_gin" in features(endpoint[backend-database]))'
-      - '("btree_gist" in features(endpoint[database])) == ("btree_gist" in features(endpoint[backend-database]))'
-      - '("citext" in features(endpoint[database])) == ("citext" in features(endpoint[backend-database]))'
-      - '("cube" in features(endpoint[database])) == ("cube" in features(endpoint[backend-database]))'
-      - '("debversion" in features(endpoint[database])) == ("debversion" in features(endpoint[backend-database]))'
-      - '("dict_int" in features(endpoint[database])) == ("dict_int" in features(endpoint[backend-database]))'
-      - '("dict_xsyn" in features(endpoint[database])) == ("dict_xsyn" in features(endpoint[backend-database]))'
-      - '("earthdistance" in features(endpoint[database])) == ("earthdistance" in
+      - '("plugin_address_standardizer_data_us" in features(endpoint[database])) ==
+        ("plugin_address_standardizer_data_us" in features(endpoint[backend-database]))'
+      - '("plugin_pgaudit" in features(endpoint[database])) == ("plugin_pgaudit" in
         features(endpoint[backend-database]))'
-      - '("fuzzystrmatch" in features(endpoint[database])) == ("fuzzystrmatch" in
+      - '("plugin_bloom" in features(endpoint[database])) == ("plugin_bloom" in features(endpoint[backend-database]))'
+      - '("plugin_bool_plperl" in features(endpoint[database])) == ("plugin_bool_plperl"
+        in features(endpoint[backend-database]))'
+      - '("plugin_btree_gin" in features(endpoint[database])) == ("plugin_btree_gin"
+        in features(endpoint[backend-database]))'
+      - '("plugin_btree_gist" in features(endpoint[database])) == ("plugin_btree_gist"
+        in features(endpoint[backend-database]))'
+      - '("plugin_citext" in features(endpoint[database])) == ("plugin_citext" in
         features(endpoint[backend-database]))'
-      - '("hll" in features(endpoint[database])) == ("hll" in features(endpoint[backend-database]))'
-      - '("hstore" in features(endpoint[database])) == ("hstore" in features(endpoint[backend-database]))'
-      - '("hypopg" in features(endpoint[database])) == ("hypopg" in features(endpoint[backend-database]))'
-      - '("icu_ext" in features(endpoint[database])) == ("icu_ext" in features(endpoint[backend-database]))'
-      - '("intarray" in features(endpoint[database])) == ("intarray" in features(endpoint[backend-database]))'
-      - '("ip4r" in features(endpoint[database])) == ("ip4r" in features(endpoint[backend-database]))'
-      - '("isn" in features(endpoint[database])) == ("isn" in features(endpoint[backend-database]))'
-      - '("jsonb_plperl" in features(endpoint[database])) == ("jsonb_plperl" in features(endpoint[backend-database]))'
-      - '("lo" in features(endpoint[database])) == ("lo" in features(endpoint[backend-database]))'
-      - '("ltree" in features(endpoint[database])) == ("ltree" in features(endpoint[backend-database]))'
-      - '("old_snapshot" in features(endpoint[database])) == ("old_snapshot" in features(endpoint[backend-database]))'
-      - '("orafce" in features(endpoint[database])) == ("orafce" in features(endpoint[backend-database]))'
-      - '("pg_freespacemap" in features(endpoint[database])) == ("pg_freespacemap"
+      - '("plugin_cube" in features(endpoint[database])) == ("plugin_cube" in features(endpoint[backend-database]))'
+      - '("plugin_debversion" in features(endpoint[database])) == ("plugin_debversion"
         in features(endpoint[backend-database]))'
-      - '("pg_similarity" in features(endpoint[database])) == ("pg_similarity" in
+      - '("plugin_dict_int" in features(endpoint[database])) == ("plugin_dict_int"
+        in features(endpoint[backend-database]))'
+      - '("plugin_dict_xsyn" in features(endpoint[database])) == ("plugin_dict_xsyn"
+        in features(endpoint[backend-database]))'
+      - '("plugin_earthdistance" in features(endpoint[database])) == ("plugin_earthdistance"
+        in features(endpoint[backend-database]))'
+      - '("plugin_fuzzystrmatch" in features(endpoint[database])) == ("plugin_fuzzystrmatch"
+        in features(endpoint[backend-database]))'
+      - '("plugin_hll" in features(endpoint[database])) == ("plugin_hll" in features(endpoint[backend-database]))'
+      - '("plugin_hstore" in features(endpoint[database])) == ("plugin_hstore" in
         features(endpoint[backend-database]))'
-      - '("pg_stat_statements" in features(endpoint[database])) == ("pg_stat_statements"
-        in features(endpoint[backend-database]))'
-      - '("pg_trgm" in features(endpoint[database])) == ("pg_trgm" in features(endpoint[backend-database]))'
-      - '("pg_visibility" in features(endpoint[database])) == ("pg_visibility" in
+      - '("plugin_hypopg" in features(endpoint[database])) == ("plugin_hypopg" in
         features(endpoint[backend-database]))'
-      - '("pgrowlocks" in features(endpoint[database])) == ("pgrowlocks" in features(endpoint[backend-database]))'
-      - '("pgstattuple" in features(endpoint[database])) == ("pgstattuple" in features(endpoint[backend-database]))'
-      - '("plperl" in features(endpoint[database])) == ("plperl" in features(endpoint[backend-database]))'
-      - '("plpython3u" in features(endpoint[database])) == ("plpython3u" in features(endpoint[backend-database]))'
-      - '("pltcl" in features(endpoint[database])) == ("pltcl" in features(endpoint[backend-database]))'
-      - '("postgis" in features(endpoint[database])) == ("postgis" in features(endpoint[backend-database]))'
-      - '("postgis_raster" in features(endpoint[database])) == ("postgis_raster" in
+      - '("plugin_icu_ext" in features(endpoint[database])) == ("plugin_icu_ext" in
         features(endpoint[backend-database]))'
-      - '("postgis_tiger_geocoder" in features(endpoint[database])) == ("postgis_tiger_geocoder"
+      - '("plugin_intarray" in features(endpoint[database])) == ("plugin_intarray"
         in features(endpoint[backend-database]))'
-      - '("postgis_topology" in features(endpoint[database])) == ("postgis_topology"
+      - '("plugin_ip4r" in features(endpoint[database])) == ("plugin_ip4r" in features(endpoint[backend-database]))'
+      - '("plugin_isn" in features(endpoint[database])) == ("plugin_isn" in features(endpoint[backend-database]))'
+      - '("plugin_jsonb_plperl" in features(endpoint[database])) == ("plugin_jsonb_plperl"
         in features(endpoint[backend-database]))'
-      - '("prefix" in features(endpoint[database])) == ("prefix" in features(endpoint[backend-database]))'
-      - '("rdkit" in features(endpoint[database])) == ("rdkit" in features(endpoint[backend-database]))'
-      - '("seg" in features(endpoint[database])) == ("seg" in features(endpoint[backend-database]))'
-      - '("spi" in features(endpoint[database])) == ("spi" in features(endpoint[backend-database]))'
-      - '("tablefunc" in features(endpoint[database])) == ("tablefunc" in features(endpoint[backend-database]))'
-      - '("tcn" in features(endpoint[database])) == ("tcn" in features(endpoint[backend-database]))'
-      - '("tds_fdw" in features(endpoint[database])) == ("tds_fdw" in features(endpoint[backend-database]))'
-      - '("timescaledb" in features(endpoint[database])) == ("timescaledb" in features(endpoint[backend-database]))'
-      - '("tsm_system_rows" in features(endpoint[database])) == ("tsm_system_rows"
+      - '("plugin_lo" in features(endpoint[database])) == ("plugin_lo" in features(endpoint[backend-database]))'
+      - '("plugin_ltree" in features(endpoint[database])) == ("plugin_ltree" in features(endpoint[backend-database]))'
+      - '("plugin_old_snapshot" in features(endpoint[database])) == ("plugin_old_snapshot"
         in features(endpoint[backend-database]))'
-      - '("tsm_system_time" in features(endpoint[database])) == ("tsm_system_time"
+      - '("plugin_orafce" in features(endpoint[database])) == ("plugin_orafce" in
+        features(endpoint[backend-database]))'
+      - '("plugin_pg_freespacemap" in features(endpoint[database])) == ("plugin_pg_freespacemap"
         in features(endpoint[backend-database]))'
-      - '("unaccent" in features(endpoint[database])) == ("unaccent" in features(endpoint[backend-database]))'
-      - '("uuid-ossp" in features(endpoint[database])) == ("uuid-ossp" in features(endpoint[backend-database]))'
-      - '("vector" in features(endpoint[database])) == ("vector" in features(endpoint[backend-database]))'
+      - '("plugin_pg_similarity" in features(endpoint[database])) == ("plugin_pg_similarity"
+        in features(endpoint[backend-database]))'
+      - '("plugin_pg_stat_statements" in features(endpoint[database])) == ("plugin_pg_stat_statements"
+        in features(endpoint[backend-database]))'
+      - '("plugin_pg_trgm" in features(endpoint[database])) == ("plugin_pg_trgm" in
+        features(endpoint[backend-database]))'
+      - '("plugin_pg_visibility" in features(endpoint[database])) == ("plugin_pg_visibility"
+        in features(endpoint[backend-database]))'
+      - '("plugin_pgrowlocks" in features(endpoint[database])) == ("plugin_pgrowlocks"
+        in features(endpoint[backend-database]))'
+      - '("plugin_pgstattuple" in features(endpoint[database])) == ("plugin_pgstattuple"
+        in features(endpoint[backend-database]))'
+      - '("plugin_plperl" in features(endpoint[database])) == ("plugin_plperl" in
+        features(endpoint[backend-database]))'
+      - '("plugin_plpython3u" in features(endpoint[database])) == ("plugin_plpython3u"
+        in features(endpoint[backend-database]))'
+      - '("plugin_pltcl" in features(endpoint[database])) == ("plugin_pltcl" in features(endpoint[backend-database]))'
+      - '("plugin_postgis" in features(endpoint[database])) == ("plugin_postgis" in
+        features(endpoint[backend-database]))'
+      - '("plugin_postgis_raster" in features(endpoint[database])) == ("plugin_postgis_raster"
+        in features(endpoint[backend-database]))'
+      - '("plugin_postgis_tiger_geocoder" in features(endpoint[database])) == ("plugin_postgis_tiger_geocoder"
+        in features(endpoint[backend-database]))'
+      - '("plugin_postgis_topology" in features(endpoint[database])) == ("plugin_postgis_topology"
+        in features(endpoint[backend-database]))'
+      - '("plugin_prefix" in features(endpoint[database])) == ("plugin_prefix" in
+        features(endpoint[backend-database]))'
+      - '("plugin_rdkit" in features(endpoint[database])) == ("plugin_rdkit" in features(endpoint[backend-database]))'
+      - '("plugin_seg" in features(endpoint[database])) == ("plugin_seg" in features(endpoint[backend-database]))'
+      - '("plugin_spi" in features(endpoint[database])) == ("plugin_spi" in features(endpoint[backend-database]))'
+      - '("plugin_tablefunc" in features(endpoint[database])) == ("plugin_tablefunc"
+        in features(endpoint[backend-database]))'
+      - '("plugin_tcn" in features(endpoint[database])) == ("plugin_tcn" in features(endpoint[backend-database]))'
+      - '("plugin_tds_fdw" in features(endpoint[database])) == ("plugin_tds_fdw" in
+        features(endpoint[backend-database]))'
+      - '("plugin_timescaledb" in features(endpoint[database])) == ("plugin_timescaledb"
+        in features(endpoint[backend-database]))'
+      - '("plugin_tsm_system_rows" in features(endpoint[database])) == ("plugin_tsm_system_rows"
+        in features(endpoint[backend-database]))'
+      - '("plugin_tsm_system_time" in features(endpoint[database])) == ("plugin_tsm_system_time"
+        in features(endpoint[backend-database]))'
+      - '("plugin_unaccent" in features(endpoint[database])) == ("plugin_unaccent"
+        in features(endpoint[backend-database]))'
+      - '("plugin_uuid-ossp" in features(endpoint[database])) == ("plugin_uuid-ossp"
+        in features(endpoint[backend-database]))'
+      - '("plugin_vector" in features(endpoint[database])) == ("plugin_vector" in
+        features(endpoint[backend-database]))'
       # Backend database must have the same risk
       - 'risks(charms(endpoint[backend-database])) == risks({self})'
