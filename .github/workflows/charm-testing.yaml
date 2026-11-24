@@ -120,6 +120,9 @@ jobs:
       TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
       NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
       BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
+      # Services to set up on each cloud. Everything is set up until the scheduler
+      # requests features per run.
+      CLOUD_FEATURES: '["s3-api"]'
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -159,17 +162,6 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
-      - name: Get target environment info
-        id: target_env_info
-        uses: ./.github/actions/get-environment-info
-        with:
-          environment_name: ${{ inputs.target_environment }}
-      - name: Get neighbor environment info
-        id: neighbor_env_info
-        if: ${{ inputs.neighbor_environment != '' }}
-        uses: ./.github/actions/get-environment-info
-        with:
-          environment_name: ${{ inputs.neighbor_environment }}
       - name: Log job inputs
         shell: bash
         env:
@@ -244,87 +236,25 @@ jobs:
       - name: Ensure Juju home directory exists
         shell: bash
         run: mkdir -p $HOME/.local/share/juju
-      - name: Resolve Juju target cloud credentials
-        id: target_creds
-        shell: bash
-        env:
-          CREDENTIALS_SECRET_NAME: ${{ steps.target_env_info.outputs.credentials-secret }}
-          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
-          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
-          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
-          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
-          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
-        run: |
-          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
-            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Setup target S3 config
-        id: target_s3_config
-        shell: bash
-        env:
-          S3_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-secret-name }}
-          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
-        run: |
-          if [[ -z "${S3_SECRET_NAME}" ]]; then
-            exit 0
-          fi
-          umask 077
-          S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-target.XXXXXX")"
-          printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
-          echo "config-path=${S3_CONFIG_PATH}" >> "$GITHUB_OUTPUT"
-      - name: Resolve Juju neighbor cloud credentials
-        id: neighbor_creds
-        if: ${{ inputs.neighbor_environment != '' }}
-        shell: bash
-        env:
-          CREDENTIALS_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.credentials-secret }}
-          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
-          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
-          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
-          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
-          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
-        run: |
-          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
-            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Setup neighbor S3 config
-        id: neighbor_s3_config
-        if: ${{ inputs.neighbor_environment != '' }}
-        shell: bash
-        env:
-          S3_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-secret-name }}
-          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
-        run: |
-          if [[ -z "${S3_SECRET_NAME}" ]]; then
-            exit 0
-          fi
-          umask 077
-          S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-neighbor.XXXXXX")"
-          printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
-          echo "config-path=${S3_CONFIG_PATH}" >> "$GITHUB_OUTPUT"
       - name: Setup Target Cloud
         id: setup_target
         uses: ./.github/actions/setup-environment/setup-cloud
+        env: &cloud-secrets
+          SETUP_CLOUD_SECRET_PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          SETUP_CLOUD_SECRET_STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+          SETUP_CLOUD_SECRET_PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+          SETUP_CLOUD_SECRET_PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+          SETUP_CLOUD_SECRET_PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          SETUP_CLOUD_SECRET_PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
+          SETUP_CLOUD_SECRET_S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
+          SETUP_CLOUD_SECRET_S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
+          SETUP_CLOUD_SECRET_S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
+          SETUP_CLOUD_SECRET_S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
+          SETUP_CLOUD_SECRET_S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
+          SETUP_CLOUD_SECRET_S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
         with:
-          cloud-name: target-cloud
-          cloud-type: ${{ steps.target_env_info.outputs.cloud-type }}
-          cloud-credentials: ${{ steps.target_creds.outputs.cloud-credentials }}
+          environment: ${{ inputs.target_environment }}
+          features: ${{ env.CLOUD_FEATURES }}
       - name: Post 'setup_target_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -338,10 +268,10 @@ jobs:
         id: setup_neighbor
         if: ${{ inputs.neighbor_environment != '' }}
         uses: ./.github/actions/setup-environment/setup-cloud
+        env: *cloud-secrets
         with:
-          cloud-name: neighbor-cloud
-          cloud-type: ${{ steps.neighbor_env_info.outputs.cloud-type }}
-          cloud-credentials: ${{ steps.neighbor_creds.outputs.cloud-credentials }}
+          environment: ${{ inputs.neighbor_environment }}
+          features: ${{ env.CLOUD_FEATURES }}
       - name: Post 'setup_neighbor_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -375,18 +305,8 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config-path }}
-          S3_CONFIG_neighbor_cloud: ${{ steps.neighbor_s3_config.outputs.config-path }}
-          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
-          KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
-          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
-          CLOUD_DEFINITION_neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_neighbor_cloud: ${{ steps.setup_neighbor.outputs.credentials-path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
-          neighbor_cloud: ${{ (inputs.same_controller && inputs.neighbor_environment
-            == inputs.target_environment) && steps.setup_target.outputs.cloud-name
-            || steps.setup_neighbor.outputs.cloud-name }}
+          neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-name }}
           same_controller: ${{ inputs.same_controller }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
@@ -396,21 +316,21 @@ jobs:
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          platform: ${{ steps.target_env_info.outputs.platform }}
+          platform: ${{ steps.setup_target.outputs.platform }}
           log_level: ${{ inputs.log_level }}
-          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
-          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
-          model_config: ${{ steps.target_env_info.outputs.model-config }}
+          bootstrap_config: ${{ steps.setup_target.outputs.bootstrap-config }}
+          bootstrap_constraints: ${{ steps.setup_target.outputs.bootstrap-constraints }}
+          model_config: ${{ steps.setup_target.outputs.model-config }}
           metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
-          neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
-          neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
-          neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
-          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
-          neighbor_remote_logging: ${{ steps.neighbor_env_info.outputs.remote-logging }}
+          neighbor_bootstrap_config: ${{ steps.setup_neighbor.outputs.bootstrap-config }}
+          neighbor_bootstrap_constraints: ${{ steps.setup_neighbor.outputs.bootstrap-constraints }}
+          neighbor_model_config: ${{ steps.setup_neighbor.outputs.model-config }}
+          target_remote_logging: ${{ steps.setup_target.outputs.remote-logging }}
+          neighbor_remote_logging: ${{ steps.setup_neighbor.outputs.remote-logging }}
           neighbor_metadata_source: ${{ steps.setup_neighbor.outputs.metadata-source }}
-          neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
-          target_arch: ${{ steps.target_env_info.outputs.arch }}
-          neighbor_arch: ${{ steps.neighbor_env_info.outputs.arch }}
+          neighbor_platform: ${{ steps.setup_neighbor.outputs.platform }}
+          target_arch: ${{ steps.setup_target.outputs.arch }}
+          neighbor_arch: ${{ steps.setup_neighbor.outputs.arch }}
           run_id: ${{ github.run_id }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
@@ -469,10 +389,6 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config-path }}
-          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
-          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
@@ -482,14 +398,14 @@ jobs:
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          platform: ${{ steps.target_env_info.outputs.platform }}
+          platform: ${{ steps.setup_target.outputs.platform }}
           log_level: ${{ inputs.log_level }}
-          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
-          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
-          model_config: ${{ steps.target_env_info.outputs.model-config }}
-          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
+          bootstrap_config: ${{ steps.setup_target.outputs.bootstrap-config }}
+          bootstrap_constraints: ${{ steps.setup_target.outputs.bootstrap-constraints }}
+          model_config: ${{ steps.setup_target.outputs.model-config }}
+          target_remote_logging: ${{ steps.setup_target.outputs.remote-logging }}
           metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
-          target_arch: ${{ steps.target_env_info.outputs.arch }}
+          target_arch: ${{ steps.setup_target.outputs.arch }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
