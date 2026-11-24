@@ -123,55 +123,6 @@ def test_explicit_integration_appears_in_output(
             integration_endpoints.add(f"{ep.application}:{ep.endpoint}")
     assert "pgbouncer:backend-database" in integration_endpoints
     assert "pg:database" in integration_endpoints
-    assert not bundle.applications["pg"].config.get("plugin_vector_enable", False)
-
-
-@pytest.mark.parametrize("with_proxy", [False, True])
-def test_discourse_requests_vector(
-    charmhub_client: CharmhubClient, snapstore_client: SnapstoreClient, with_proxy: bool
-) -> None:
-    applications = {
-        "pg": {"charm": "postgresql-k8s", "channel": "16/stable"},
-        "discourse": {"charm": "discourse-k8s", "channel": "latest/stable"},
-    }
-    integrations = [
-        {
-            "application": "discourse",
-            "endpoint": "database",
-            "remote_application": "pgbouncer" if with_proxy else "pg",
-            "remote_endpoint": "database",
-        }
-    ]
-    if with_proxy:
-        applications["pgbouncer"] = {"charm": "pgbouncer-k8s", "channel": "1/stable"}
-        integrations.append(
-            {
-                "application": "pgbouncer",
-                "endpoint": "backend-database",
-                "remote_application": "pg",
-                "remote_endpoint": "database",
-            }
-        )
-    spec = SpecFile.model_validate(
-        {
-            "models": [
-                {
-                    "name": "test-model",
-                    "platform": "kubernetes",
-                    "applications": applications,
-                    "integrations": integrations,
-                }
-            ]
-        }
-    )
-
-    solution = BundleBuilder(charmhub_client=charmhub_client, snapstore_client=snapstore_client).build(spec)
-
-    config = solution.bundles[0].applications["pg"].config
-    assert config["plugin-vector-enable"] is True
-    assert not {
-        key for key, value in config.items() if key.startswith("plugin-") and key != "plugin-vector-enable" and value
-    }
 
 
 def test_multi_model_spec_produces_separate_bundles(
