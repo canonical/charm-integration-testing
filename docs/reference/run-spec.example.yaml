@@ -1,15 +1,13 @@
 # DRAFT proposal for SQT-1464: a structured, versioned run specification.
 #
-# The file says WHAT to test, plus the NEEDS of where to test it. It never names
-# the place (environment, slot, runner, cloud, credentials); those come from the
-# environment definition (static/environments.yaml) or the invocation.
-# Architecture and Juju version are supplied by the environment. S3 setup is
-# configured outside the pytest invocation.
+# The file says what to test. The environment and invocation supply placement,
+# architecture, Juju version, and credentials. S3 setup is configured outside
+# the pytest invocation. Charm feature requirements come from the bundle's charms.
 #
-# Shape: the bundle builder spec (docs/reference/spec-file.rst) plus `needs` per
-# model and a `test` block. Topology is implied by the structure: one model is a
-# plain run, two models sharing a controller are CMR, two on separate
-# controllers are CCR. No scheduler topology names appear here.
+# Shape: models, applications, and integrations from the bundle builder spec
+# (docs/reference/spec-file.rst), plus a `test` block. Model names are logical
+# identifiers; `remote_model` identifies a cross-model integration. Whether the
+# models share a controller is an environment decision.
 #
 # Proposed precedence: CLI flag > environment variable > this file > default.
 # No secrets or credentials are allowed in this file.
@@ -18,12 +16,6 @@ version: 1
 
 models:
   - name: target
-    # Controller labels are symbolic: models with the same label share a
-    # controller. Real controller and model names are generated per run.
-    controller: primary
-    # Requirements on where this model runs. Replaces `platform`.
-    needs:
-      features: [k8s-api]
     applications:
       postgresql:
         charm: postgresql-k8s
@@ -38,9 +30,6 @@ models:
         remote_model: neighbor
 
   - name: neighbor
-    controller: secondary # same label as `target` would make this CMR instead of CCR
-    needs:
-      features: [lxd-api]
     applications:
       data-integrator:
         charm: data-integrator
@@ -49,8 +38,12 @@ models:
 # --target-application, --target-endpoint, --neighbor-application and
 # --neighbor-endpoint. Must match an integration declared above.
 test:
+  model: target
   application: postgresql
   endpoint: database
+  remote_model: neighbor
+  remote_application: data-integrator
+  remote_endpoint: postgresql
   downgrade-revision: 450 # optional; "default" lets Test Observer pick one
 
 # Pre-built variant (QUESTION: is this the right shape?)
@@ -60,8 +53,6 @@ test:
 # The two forms are mutually exclusive per model.
 #
 #   - name: target
-#     controller: primary
-#     needs: {features: [k8s-api]}
 #     bundle:
 #       applications: {postgresql: {charm: postgresql-k8s, ...}}
 #       relations: [...]
