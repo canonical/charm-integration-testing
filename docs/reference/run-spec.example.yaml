@@ -3,6 +3,8 @@
 # The file says WHAT to test, plus the NEEDS of where to test it. It never names
 # the place (environment, slot, runner, cloud, credentials); those come from the
 # environment definition (static/environments.yaml) or the invocation.
+# Architecture and Juju version are supplied by the environment. S3 setup is
+# configured outside the pytest invocation.
 #
 # Shape: the bundle builder spec (docs/reference/spec-file.rst) plus `needs` per
 # model and a `test` block. Topology is implied by the structure: one model is a
@@ -14,9 +16,6 @@
 
 version: 1
 
-# Juju client snap channel for the run.
-juju: 3.6/stable
-
 models:
   - name: target
     # Controller labels are symbolic: models with the same label share a
@@ -24,8 +23,7 @@ models:
     controller: primary
     # Requirements on where this model runs. Replaces `platform`.
     needs:
-      features: [k8s-api, s3-api]
-      arch: amd64 # QUESTION: a feature (arch-amd64) or a dedicated field?
+      features: [k8s-api]
     applications:
       postgresql:
         charm: postgresql-k8s
@@ -43,7 +41,6 @@ models:
     controller: secondary # same label as `target` would make this CMR instead of CCR
     needs:
       features: [lxd-api]
-      arch: amd64
     applications:
       data-integrator:
         charm: data-integrator
@@ -58,12 +55,13 @@ test:
 
 # Pre-built variant (QUESTION: is this the right shape?)
 # ------------------------------------------------------
-# A model may carry a bundle_builder_x output bundle instead of `applications`
-# and `integrations`. The two forms are mutually exclusive per model.
+# The dispatcher may build bundles before invoking pytest. A model may carry a
+# bundle_builder_x output bundle instead of `applications` and `integrations`.
+# The two forms are mutually exclusive per model.
 #
 #   - name: target
 #     controller: primary
-#     needs: {features: [k8s-api, s3-api], arch: amd64}
+#     needs: {features: [k8s-api]}
 #     bundle:
 #       applications: {postgresql: {charm: postgresql-k8s, ...}}
 #       relations: [...]
@@ -71,12 +69,11 @@ test:
 # If every model has `bundle`, the suite starts at `--current-state no_controller`
 # and skips test_build_bundle; otherwise it starts at `no_bundle` and builds.
 # Mixing the two forms in one spec is rejected. `test` is validated against the
-# bundle, and the bundle wins on any conflict.
+# bundles, and conflicts are rejected. During deployment, `test_deploy` has all
+# bundles and determines run-specific offer references.
 #
 # Open questions
 # --------------
-# - Does the exported bundle embed run-specific controller/model names (CMR
-#   offers and consumes)? If so, they need rewriting on load.
 # - Should `bundle` also accept a relative path, or inline only?
 # - Short form for the common single-charm-against-one-neighbor case?
 # - Should the suite emit this file after test_build_bundle, so every run
