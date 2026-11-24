@@ -18,9 +18,9 @@ outputs:
   cloud-name:
     description: Name of the Juju cloud, as declared in static/environments.yaml.
     value: ${{ steps.info.outputs.cloud-name }}
-  cloud-type:
-    description: Cloud setup type for the selected slot.
-    value: ${{ steps.info.outputs.cloud-type }}
+  setup-mode:
+    description: Cloud setup mode for the selected slot.
+    value: ${{ steps.info.outputs.setup-mode }}
   platform:
     description: Platform for the selected slot (kubernetes or machine).
     value: ${{ steps.info.outputs.platform }}
@@ -64,7 +64,7 @@ runs:
         environment_name: ${{ inputs.environment }}
     - name: Setup Remote Cloud
       id: setup-remote
-      if: ${{ steps.info.outputs.cloud-type == 'remote' }}
+      if: ${{ steps.info.outputs.setup-mode == 'remote' }}
       uses: ./.github/actions/setup-environment/setup-remote
       with:
         kubeconfig-secret: ${{ steps.info.outputs.kubeconfig-secret }}

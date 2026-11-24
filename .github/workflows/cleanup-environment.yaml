@@ -107,7 +107,7 @@ jobs:
           KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
           NOVARC_SECRET_NAME: ${{ steps.env_info.outputs.novarc-secret }}
           LXD_SECRET_NAME: ${{ steps.env_info.outputs.lxd-secret }}
-          CLOUD_TYPE: ${{ steps.env_info.outputs.cloud-type }}
+          SETUP_MODE: ${{ steps.env_info.outputs.setup-mode }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
@@ -120,7 +120,7 @@ jobs:
             echo "::error::AGE_THRESHOLD must be a finite number greater than zero"
             exit 1
           fi
-          if [[ "${CLOUD_TYPE}" == remote ]]; then
+          if [[ "${SETUP_MODE}" == remote ]]; then
             count=0
             for secret in "${KUBECONFIG_SECRET_NAME}" "${NOVARC_SECRET_NAME}" "${LXD_SECRET_NAME}"; do
               if [[ -n "${secret}" ]]; then count=$((count + 1)); fi
