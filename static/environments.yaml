@@ -1,6 +1,6 @@
 ---
 environments:
-  # Slots sharing a cloud use the same Juju registration within a test job.
+  # Slots sharing a cloud declare the same Juju cloud name.
   # PS6 PROD KUBERNETES
   ps6-sqa-prod_charm_qa_kubernetes-1: &ps6-sqa-prod_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
