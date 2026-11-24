@@ -226,6 +226,9 @@ test; it does not fall back to the packed charm or a default branch. The source
 checkout must have the target charm at its root. Non-GitHub revisions are
 fetched directly first; only unresolved abbreviated revisions require scanning
 advertised refs, with blob filtering where supported by the Git server.
+Fetches and GitHub commit lookups retry transient network failures up to three
+attempts with exponential backoff. Authentication, missing refs, and invalid
+source information fail without retrying.
 The source fixture returns ``None`` if Git is unavailable, and the lint test
 decides to skip; source download and checkout errors otherwise fail the test.
 

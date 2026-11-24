@@ -11,6 +11,36 @@ from subprocess import run as subprocess_run  # nosec B404
 from urllib.parse import urlsplit
 
 import requests
+from tenacity import before_sleep_log, retry, retry_if_exception, stop_after_attempt, wait_exponential
+
+
+def _is_transient_network_error(error: BaseException) -> bool:
+    if isinstance(error, requests.HTTPError):
+        return error.response is not None and error.response.status_code in {429, 500, 502, 503, 504}
+    if isinstance(error, requests.exceptions.SSLError):
+        return False
+    if isinstance(error, (requests.ConnectionError, requests.Timeout)):
+        return True
+    if isinstance(error, CalledProcessError):
+        return (
+            re.search(
+                r"\bcurl (?:5|6|7|18|28|52|55|56)\b"
+                r"|requested url returned error: (?:429|500|502|503|504)\b"
+                r"|could not resolve host|failed to connect|connection reset by peer|connection timed out",
+                (error.stderr or "").lower(),
+            )
+            is not None
+        )
+    return False
+
+
+_retry_network = retry(
+    retry=retry_if_exception(_is_transient_network_error),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, max=4),
+    before_sleep=before_sleep_log(logging.getLogger(__name__), logging.WARNING),
+    reraise=True,
+)
 
 
 class GitClient:
@@ -66,6 +96,7 @@ class GitClient:
         self._run("-C", str(destination), "checkout", "--detach", commit)
         return commit
 
+    @_retry_network
     def _fetch_advertised_refs(self, repository: str, destination: Path) -> None:
         # Fetch to a private namespace so a remote ref cannot shadow the abbreviated object ID.
         fetch_args = (
@@ -89,6 +120,7 @@ class GitClient:
                 raise
             self._run(*fetch_args[:3], *fetch_args[4:])
 
+    @_retry_network
     def _fetch(self, repository: str, revision: str, destination: Path) -> None:
         self._run("-C", str(destination), "fetch", "--depth=1", "--no-tags", "--", repository, revision)
 
@@ -104,6 +136,7 @@ class GitClient:
             },
         ).stdout.strip()
 
+    @_retry_network
     def _resolve_github_commit(self, repository: str, revision: str) -> str:
         path = urlsplit(repository).path.strip("/").removesuffix(".git")
         response = requests.get(
