@@ -52,16 +52,29 @@ runs:
       id: credentials
       shell: bash
       env:
-        KUBECONFIG_SECRET_NAME: ${{ inputs.kubeconfig-secret }}
-        NOVARC_SECRET_NAME: ${{ inputs.novarc-secret }}
-        LXD_SECRET_NAME: ${{ inputs.lxd-secret }}
         KUBECONFIG_CONTENT: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.kubeconfig-secret)] }}
         NOVARC: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.novarc-secret)] }}
         LXD_CREDENTIALS: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.lxd-secret)] }}
         CLOUD_NAME: ${{ inputs.cloud-name }}
         SERVICE: ${{ inputs.service }}
       run: |
-        mise run prepare-remote-cloud >> "$GITHUB_OUTPUT"
+        case "${SERVICE}" in
+          k8s) credentials="${KUBECONFIG_CONTENT}" ;;
+          o7k) credentials="${NOVARC}" ;;
+          lxd) credentials="${LXD_CREDENTIALS}" ;;
+          *)
+            echo "::error::Unsupported remote cloud service '${SERVICE}'." >&2
+            exit 1
+            ;;
+        esac
+        record="${RUNNER_TEMP}/juju-clouds/${CLOUD_NAME}.${SERVICE}.outputs"
+        if [[ -f "${record}" ]]; then
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        elif [[ -z "${credentials}" ]]; then
+          echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'." >&2
+          exit 1
+        fi
+        echo "record=${record}" >> "$GITHUB_OUTPUT"
     - name: Create cloud workspace
       id: workspace
       if: ${{ steps.credentials.outputs.found != 'true' }}
