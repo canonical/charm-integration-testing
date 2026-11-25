@@ -50,6 +50,15 @@ class CharmReleaseNotFoundException(Exception):
         super().__init__(message)
 
 
+class UnexpectedStoreResponseError(Exception):
+    """Charmhub returned an unexpected response while resolving a release."""
+
+    def __init__(self, *, request: ReleaseRequest, detail: str, error_code: str | None = None) -> None:
+        self.request = request
+        self.error_code = error_code
+        super().__init__(detail)
+
+
 class PlatformMismatchError(CharmReleaseNotFoundException):
     """A release supports different platforms from the requested model."""
 

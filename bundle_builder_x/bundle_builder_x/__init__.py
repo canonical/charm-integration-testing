@@ -31,6 +31,7 @@ from .release_errors import (
     ReleaseRequest,
     ReleaseUnavailableError,
     ReleaseUnavailableKind,
+    UnexpectedStoreResponseError,
     leaf_release_errors,
 )
 from .snapstore_http import SnapVersionNotFoundException
@@ -81,5 +82,6 @@ __all__ = [
     "UnfulfilledEndpointDiagnostic",
     "UnresolvedApplicationDiagnostic",
     "UnresolvedIntegrationDiagnostic",
+    "UnexpectedStoreResponseError",
     "leaf_release_errors",
 ]
