@@ -60,6 +60,11 @@ Do not comment on or close anything, and do not file a new issue, until the
 user has confirmed how they want to proceed. Only proceed to file a new
 issue directly, without asking, if the search turns up no plausible match.
 
+For a specific scenario covered by a generic project issue, the generic parent
+alone is not a duplicate. Search its sub-issues and other issues for the specific
+scenario. If it is distinct and the user authorized filing, create it as a
+sub-issue; see [triage-charm-tests](../triage-charm-tests/SKILL.md).
+
 ---
 
 ## Step 2 — Pick and read the matching template, if one exists
