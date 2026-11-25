@@ -19,6 +19,9 @@ outputs:
   cloud-name:
     description: Juju cloud name shared by every environment on the same cloud.
     value: ${{ steps.lookup.outputs.cloud-name }}
+  remote-service:
+    description: Remote cloud service selected by the credential field.
+    value: ${{ steps.lookup.outputs.remote-service }}
   kubeconfig-secret:
     description: Name of the GitHub secret holding the Kubernetes kubeconfig.
     value: ${{ steps.lookup.outputs.kubeconfig-secret }}
@@ -56,18 +59,7 @@ runs:
         ENVIRONMENT_NAME: ${{ inputs.environment_name }}
         WORKSPACE: ${{ github.workspace }}
       run: |-
-        environment=$(yq -o=json -I=0 '.environments[strenv(ENVIRONMENT_NAME)]' "${WORKSPACE}/static/environments.yaml")
-        jq -e --arg name "${ENVIRONMENT_NAME}" '
-          def valid_cloud_name:
-            if type == "string" then test("^[a-z0-9]+(-[a-z0-9]+)*$") else false end;
-          if . == null then error("Unknown environment \($name)")
-          elif .platform == null then error("Environment \($name) needs a platform")
-          elif .["setup-mode"] != "remote" then
-            error("Unsupported setup mode \(.["setup-mode"]) for environment \($name)")
-          elif (.cloud | valid_cloud_name | not) then
-            error("Environment \($name) needs a lowercase, hyphenated cloud name")
-          else true end
-        ' <<< "${environment}" > /dev/null
+        environment=$(mise run get-environment-info)
         config_dir=$(mktemp -d "${RUNNER_TEMP}/environment-info.XXXXXX")
         for key in bootstrap-config bootstrap-constraints model-config; do
           jq -c --arg key "${key}" '.[$key] // {}' <<< "${environment}" > "${config_dir}/${key}.json"
@@ -78,6 +70,7 @@ runs:
           "arch=\(.arch)",
           "setup-mode=\(.["setup-mode"])",
           "cloud-name=\(.cloud)",
+          "remote-service=\(.["remote-service"])",
           "kubeconfig-secret=\(.["kubeconfig-secret"] // "")",
           "novarc-secret=\(.["novarc-secret"] // "")",
           "lxd-secret=\(.["lxd-secret"] // "")",

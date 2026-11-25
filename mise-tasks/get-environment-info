@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#MISE description="Look up and validate an environment"
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+environment=$(yq -o=json -I=0 '.environments[strenv(ENVIRONMENT_NAME)]' "${WORKSPACE}/static/environments.yaml")
+jq -ce --arg name "${ENVIRONMENT_NAME}" '
+  def valid_cloud_name:
+    if type == "string" then test("^[a-z0-9]+(-[a-z0-9]+)*$") else false end;
+  def configured: type == "string" and length > 0;
+  if . == null then error("Unknown environment \($name)")
+  elif .platform == null then error("Environment \($name) needs a platform")
+  elif .["setup-mode"] != "remote" then
+    error("Unsupported setup mode \(.["setup-mode"]) for environment \($name)")
+  elif (.cloud | valid_cloud_name | not) then
+    error("Environment \($name) needs a lowercase, hyphenated cloud name")
+  elif ([.["kubeconfig-secret"], .["novarc-secret"], .["lxd-secret"]]
+        | all(. == null or type == "string") | not) then
+    error("Environment \($name) credential fields must be strings")
+  else
+    [
+      if .["kubeconfig-secret"] | configured then "k8s" else empty end,
+      if .["novarc-secret"] | configured then "o7k" else empty end,
+      if .["lxd-secret"] | configured then "lxd" else empty end
+    ] as $services |
+    if ($services | length) != 1 then
+      error("Environment \($name) needs exactly one remote cloud credential field")
+    else . + {"remote-service": $services[0]} end
+  end
+' <<< "${environment}"

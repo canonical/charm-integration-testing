@@ -67,6 +67,7 @@ runs:
       if: ${{ steps.info.outputs.setup-mode == 'remote' }}
       uses: ./.github/actions/setup-environment/setup-remote
       with:
+        service: ${{ steps.info.outputs.remote-service }}
         kubeconfig-secret: ${{ steps.info.outputs.kubeconfig-secret }}
         novarc-secret: ${{ steps.info.outputs.novarc-secret }}
         lxd-secret: ${{ steps.info.outputs.lxd-secret }}
