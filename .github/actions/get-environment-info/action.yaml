@@ -16,6 +16,9 @@ outputs:
   cloud-type:
     description: Cloud setup type (k8s, o7k, or lxd).
     value: ${{ steps.lookup.outputs.cloud-type }}
+  cloud-name:
+    description: Juju cloud name shared by every environment on the same cloud.
+    value: ${{ steps.lookup.outputs.cloud-name }}
   credentials-secret:
     description: Name of the GitHub Actions secret holding the cloud credentials (kubeconfig
       for k8s, novarc for o7k, LXD credentials YAML for lxd).
@@ -70,6 +73,11 @@ runs:
             exit 1
             ;;
         esac
+        cloud_name=$(yq ".environments[\"${ENVIRONMENT_NAME}\"].cloud // \"\"" "${table}")
+        if [[ ! "${cloud_name}" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+          echo "::error::Environment '${ENVIRONMENT_NAME}' needs a lowercase, hyphenated 'cloud' name."
+          exit 1
+        fi
         remote_logging=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"remote-logging\"] // \"\"" "${table}")
         s3_secret_name=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"s3-secret-name\"] // \"\"" "${table}")
 
@@ -85,6 +93,7 @@ runs:
         echo "platform=${platform}" >> "${GITHUB_OUTPUT}"
         echo "arch=${arch}" >> "${GITHUB_OUTPUT}"
         echo "cloud-type=${cloud_type}" >> "${GITHUB_OUTPUT}"
+        echo "cloud-name=${cloud_name}" >> "${GITHUB_OUTPUT}"
         echo "credentials-secret=${credentials_secret}" >> "${GITHUB_OUTPUT}"
         echo "s3-secret-name=${s3_secret_name}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
