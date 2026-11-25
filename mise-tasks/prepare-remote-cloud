@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#MISE description="Check remote cloud credentials and locate existing setup"
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+case "${SERVICE}" in
+    k8s) secret_name="${KUBECONFIG_SECRET_NAME}"; credentials="${KUBECONFIG_CONTENT}" ;;
+    o7k) secret_name="${NOVARC_SECRET_NAME}"; credentials="${NOVARC}" ;;
+    lxd) secret_name="${LXD_SECRET_NAME}"; credentials="${LXD_CREDENTIALS}" ;;
+    *)
+        echo "::error::Unsupported remote cloud service '${SERVICE}'." >&2
+        exit 1
+        ;;
+esac
+if [[ -z "${secret_name}" ]]; then
+    echo "::error::Missing credential field for Juju cloud '${CLOUD_NAME}'." >&2
+    exit 1
+fi
+
+record="${RUNNER_TEMP}/juju-clouds/${CLOUD_NAME}.${SERVICE}.outputs"
+if [[ -f "${record}" ]]; then
+    echo "found=true"
+elif [[ -z "${credentials}" ]]; then
+    echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'." >&2
+    exit 1
+fi
+echo "record=${record}"

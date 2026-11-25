@@ -61,14 +61,7 @@ runs:
         CLOUD_NAME: ${{ inputs.cloud-name }}
         SERVICE: ${{ inputs.service }}
       run: |
-        record="${RUNNER_TEMP}/juju-clouds/${CLOUD_NAME}.${SERVICE}.outputs"
-        echo "record=${record}" >> "$GITHUB_OUTPUT"
-        if [[ -f "${record}" ]]; then
-          echo "found=true" >> "$GITHUB_OUTPUT"
-        elif [[ ( -n "${KUBECONFIG_SECRET_NAME}" && -z "${KUBECONFIG_CONTENT}" ) || ( -n "${NOVARC_SECRET_NAME}" && -z "${NOVARC}" ) || ( -n "${LXD_SECRET_NAME}" && -z "${LXD_CREDENTIALS}" ) ]]; then
-          echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'."
-          exit 1
-        fi
+        mise run prepare-remote-cloud >> "$GITHUB_OUTPUT"
     - name: Create cloud workspace
       id: workspace
       if: ${{ steps.credentials.outputs.found != 'true' }}
