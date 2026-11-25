@@ -6,9 +6,10 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
-from bundle_builder_x import CharmReleaseNotFoundException
+from bundle_builder_x import CharmReleaseNotFoundException, UnexpectedStoreResponseError
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.bundle_diagnostics import ApplicationReleaseDiagnostic
+from bundle_builder_x.candidate_discovery import CandidateDiscovery, ReleaseRequirements
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -23,6 +24,8 @@ from bundle_builder_x.charmhub_http import (
     RefreshResponse,
     UnparsableCharmException,
 )
+from bundle_builder_x.domain import DomainModel, ModelRef
+from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
 from bundle_builder_x.release_errors import AssumesMismatchError, PlatformMismatchError
 from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
@@ -979,6 +982,65 @@ class TestCharmhubClient:
     # ---------------------------------------------------------------------------
 
     class TestDefaultUbuntuVersion:
+        @pytest.mark.parametrize(
+            ("response", "error_code"),
+            [
+                (_ok_response(), None),
+                (_error_response("ceph-mon", "some-other-error", "unexpected"), "some-other-error"),
+            ],
+            ids=["missing-error", "unexpected-error-code"],
+        )
+        def test_unexpected_store_response_is_not_a_release_rejection(
+            self, response: RefreshResponse, error_code: str | None
+        ) -> None:
+            class StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return response
+
+            client = _make_client(StubClient())
+            with pytest.raises(UnexpectedStoreResponseError) as caught:
+                client.charm_from_store(charm_name="ceph-mon", ubuntu_arch="amd64", charm_track="latest")
+
+            assert caught.value.error_code == error_code
+            assert caught.value.request.charm_name == "ceph-mon"
+
+        def test_candidate_discovery_does_not_cache_unexpected_store_response(self) -> None:
+            class StubClient(_NullHttpClient):
+                calls = 0
+
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    self.calls += 1
+                    return _error_response("ceph-mon", "some-other-error", "unexpected")
+
+            http = StubClient()
+            discovery = CandidateDiscovery(_make_client(http))
+            model = DomainModel(arch="amd64", platform="machine", juju_version=JujuVersion(major=3, minor=6, patch=0))
+            for _ in range(2):
+                with pytest.raises(UnexpectedStoreResponseError):
+                    discovery._fetch_release(
+                        "ceph-mon", ModelRef(name="model"), model, ReleaseRequirements(track="latest")
+                    )
+            assert http.calls == 2
+
+        def test_bundle_build_propagates_unexpected_store_response(self) -> None:
+            class StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return _error_response("ceph-mon", "some-other-error", "unexpected")
+
+            builder = BundleBuilder(charmhub_client=_make_client(StubClient()))
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",
+                        applications={"ceph-mon": AppSpec(charm="ceph-mon", channel="latest")},
+                    )
+                ]
+            )
+            with pytest.raises(UnexpectedStoreResponseError, match="some-other-error"):
+                builder.build(spec)
+
         @dataclass
         class Params:
             label: str
@@ -1032,14 +1094,14 @@ class TestCharmhubClient:
                 response=_ok_response(),
                 ubuntu_arch="amd64",
                 expected_version=None,
-                raises=CharmReleaseNotFoundException,
+                raises=UnexpectedStoreResponseError,
             ),
             Params(
                 label="unexpected_error_code_raises",
                 response=_error_response("ceph-mon", "some-other-error", "unexpected"),
                 ubuntu_arch="amd64",
                 expected_version=None,
-                raises=CharmReleaseNotFoundException,
+                raises=UnexpectedStoreResponseError,
             ),
             Params(
                 label="invalid_charm_base_no_matching_arch_raises",

@@ -39,7 +39,7 @@ _CATALOG = """
 from bundle_builder_x import (
     BundleBuilder, Charm, CharmChannel, CharmEndpoint, CharmhubClient,
     CharmReleaseNotFoundException, EndpointType, PlatformMismatchError, ReleaseRequest,
-    ReleaseUnavailableError, ReleaseUnavailableKind,
+    ReleaseUnavailableError, ReleaseUnavailableKind, UnexpectedStoreResponseError,
 )
 from bundle_builder_x.charm import EndpointScope
 from juju import JujuVersion
@@ -429,35 +429,24 @@ def test_unavailable_saved_release_returns_none_for_refresh(pytester: pytest.Pyt
     result.assert_outcomes(passed=2)
 
 
-@pytest.mark.parametrize("nested", [False, True], ids=["direct-response", "nested-response"])
-def test_unexpected_charmhub_response_remains_an_error(pytester: pytest.Pytester, nested: bool) -> None:
+def test_unexpected_charmhub_response_remains_an_error(pytester: pytest.Pytester) -> None:
     # GIVEN a saved bundle whose Charmhub lookup receives an unexpected store response
     bundle = pytester.path / "saved.yaml"
     bundle.write_text("applications:\n  target:\n    charm: nrpe\n    revision: 100\n")
     pytester.makeconftest(
         _FIXTURES
         + _CATALOG
-        + dedent(f"""
-        from bundle_builder_x import ReleaseRequest, ReleaseUnavailableError, ReleaseUnavailableKind
+        + dedent("""
+        from bundle_builder_x import ReleaseRequest, UnexpectedStoreResponseError
 
         @pytest.fixture(scope="session")
         def charmhub_client():
             class UnexpectedResponse:
                 def charm_from_store(self, **kwargs):
-                    request = ReleaseRequest(charm_name="nrpe")
-                    unexpected = ReleaseUnavailableError(
-                        kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
-                        request=request,
+                    raise UnexpectedStoreResponseError(
+                        request=ReleaseRequest(charm_name="nrpe"),
                         detail="Synthetic malformed store response",
                     )
-                    if {nested!r}:
-                        raise ReleaseUnavailableError(
-                            kind=ReleaseUnavailableKind.TRACK_NOT_FOUND,
-                            request=request,
-                            detail="Synthetic track lookup failure",
-                            causes=(unexpected,),
-                        )
-                    raise unexpected
             return UnexpectedResponse()
         """)
     )
@@ -487,46 +476,22 @@ def test_unexpected_charmhub_response_remains_an_error(pytester: pytest.Pytester
 
     # THEN the unexpected store response propagates instead of returning None
     result.assert_outcomes(errors=1)
-    result.stdout.fnmatch_lines(["*ReleaseUnavailableError*"])
+    result.stdout.fnmatch_lines(["*UnexpectedStoreResponseError*"])
 
 
-def test_unexpected_store_response_in_solver_diagnostics_remains_an_error(pytester: pytest.Pytester) -> None:
-    # GIVEN a fresh bundle synthesis with a nested unexpected Charmhub error
+def test_unexpected_store_response_in_bundle_synthesis_remains_an_error(pytester: pytest.Pytester) -> None:
+    # GIVEN a fresh bundle synthesis with an unexpected Charmhub error
     pytester.makeconftest(
         _FIXTURES
         + _CATALOG
         + dedent("""
-        from bundle_builder_x import (
-            ApplicationReleaseDiagnostic,
-            ReleaseRequest,
-            ReleaseUnavailableError,
-            ReleaseUnavailableKind,
-            UnsatisfiableBundleError,
-        )
+        from bundle_builder_x import ReleaseRequest, UnexpectedStoreResponseError
 
         @pytest.fixture(scope="session")
         def bundle_solution():
-            request = ReleaseRequest(charm_name="nrpe")
-            unexpected = ReleaseUnavailableError(
-                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
-                request=request,
+            raise UnexpectedStoreResponseError(
+                request=ReleaseRequest(charm_name="nrpe"),
                 detail="Synthetic malformed store response",
-            )
-            wrapped = ReleaseUnavailableError(
-                kind=ReleaseUnavailableKind.TRACK_NOT_FOUND,
-                request=request,
-                detail="Synthetic track lookup failure",
-                causes=(unexpected,),
-            )
-            raise UnsatisfiableBundleError(
-                diagnostics=(
-                    ApplicationReleaseDiagnostic(
-                        application="target",
-                        charm_name="nrpe",
-                        model="controller/model",
-                        error=wrapped,
-                    ),
-                ),
             )
         """)
     )
@@ -562,7 +527,7 @@ def test_unexpected_store_response_in_solver_diagnostics_remains_an_error(pytest
         "-q",
     )
     result.assert_outcomes(errors=1)
-    result.stdout.fnmatch_lines(["*UnsatisfiableBundleError*"])
+    result.stdout.fnmatch_lines(["*UnexpectedStoreResponseError*"])
 
 
 def test_target_downgrade_uses_compatible_historical_revision(pytester: pytest.Pytester) -> None:
@@ -632,8 +597,7 @@ def test_unexpected_store_error_in_historical_lookup_remains_an_error(pytester: 
 class UnexpectedCatalog(Catalog):
     def charm_from_store(self, *args, **kwargs):
         if kwargs.get("charm_revision") == 60:
-            raise ReleaseUnavailableError(
-                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+            raise UnexpectedStoreResponseError(
                 request=ReleaseRequest(charm_name="nrpe", platform="machine", revision=60),
                 detail="Synthetic unexpected store response",
             )

@@ -9,7 +9,6 @@ from juju import JujuVersion
 from pydantic import BaseModel, Field
 
 from bundle_builder_x import (
-    ApplicationReleaseDiagnostic,
     AppSpec,
     BundleBuilder,
     BundleBuildFailureDiagnostic,
@@ -19,12 +18,9 @@ from bundle_builder_x import (
     CharmReleaseNotFoundException,
     IntegrationSpec,
     ModelSpec,
-    ReleaseUnavailableError,
-    ReleaseUnavailableKind,
     Solution,
     SpecFile,
     UnsatisfiableBundleError,
-    leaf_release_errors,
 )
 from bundle_builder_x import (
     JujuVersion as BundleJujuVersion,
@@ -143,13 +139,6 @@ def target_bundle_charm_selectors(target_bundle: Path, target_application: str) 
     return _TargetCharmSelectors.model_validate(bundle.applications[target_application])
 
 
-def _has_unexpected_store_response(error: CharmReleaseNotFoundException) -> bool:
-    return any(
-        isinstance(cause, ReleaseUnavailableError) and cause.kind == ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE
-        for cause in leaf_release_errors(error)
-    )
-
-
 @pytest.fixture(scope="session")
 def target_resolved_charm(
     request: pytest.FixtureRequest,
@@ -187,15 +176,8 @@ def target_resolved_charm(
     except UnsatisfiableBundleError as exc:
         if any(isinstance(diagnostic, BundleBuildFailureDiagnostic) for diagnostic in exc.diagnostics):
             raise
-        if any(
-            isinstance(diagnostic, ApplicationReleaseDiagnostic) and _has_unexpected_store_response(diagnostic.error)
-            for diagnostic in exc.diagnostics
-        ):
-            raise
         return None
-    except CharmReleaseNotFoundException as exc:
-        if _has_unexpected_store_response(exc):
-            raise
+    except CharmReleaseNotFoundException:
         return None
 
 
