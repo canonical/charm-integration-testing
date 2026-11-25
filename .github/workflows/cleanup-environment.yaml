@@ -121,14 +121,7 @@ jobs:
             exit 1
           fi
           if [[ "${SETUP_MODE}" == remote ]]; then
-            count=0
-            for secret in "${KUBECONFIG_SECRET_NAME}" "${NOVARC_SECRET_NAME}" "${LXD_SECRET_NAME}"; do
-              if [[ -n "${secret}" ]]; then count=$((count + 1)); fi
-            done
-            if [[ "${count}" != 1 ]]; then
-              echo "::error::Expected exactly one remote cloud credential field."
-              exit 1
-            fi
+            mise run validate-remote-cloud-credentials
           fi
           if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
             echo "kubernetes=true" >> $GITHUB_OUTPUT

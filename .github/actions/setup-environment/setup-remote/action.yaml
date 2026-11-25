@@ -48,31 +48,24 @@ runs:
       id: credentials
       shell: bash
       env:
-        KUBECONFIG_SECRET: ${{ inputs.kubeconfig-secret }}
-        NOVARC_SECRET: ${{ inputs.novarc-secret }}
-        LXD_SECRET: ${{ inputs.lxd-secret }}
+        KUBECONFIG_SECRET_NAME: ${{ inputs.kubeconfig-secret }}
+        NOVARC_SECRET_NAME: ${{ inputs.novarc-secret }}
+        LXD_SECRET_NAME: ${{ inputs.lxd-secret }}
         KUBECONFIG_CONTENT: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.kubeconfig-secret)] }}
         NOVARC: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.novarc-secret)] }}
         LXD_CREDENTIALS: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.lxd-secret)] }}
         CLOUD_NAME: ${{ inputs.cloud-name }}
       run: |
-        count=0
-        for secret in "${KUBECONFIG_SECRET}" "${NOVARC_SECRET}" "${LXD_SECRET}"; do
-          if [[ -n "${secret}" ]]; then count=$((count + 1)); fi
-        done
-        if [[ "${count}" != 1 ]]; then
-          echo "::error::Expected exactly one credential field for Juju cloud '${CLOUD_NAME}'."
-          exit 1
-        fi
-        if [[ -n "${KUBECONFIG_SECRET}" ]]; then service=k8s
-        elif [[ -n "${NOVARC_SECRET}" ]]; then service=o7k
+        mise run validate-remote-cloud-credentials
+        if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then service=k8s
+        elif [[ -n "${NOVARC_SECRET_NAME}" ]]; then service=o7k
         else service=lxd
         fi
         record="${RUNNER_TEMP}/juju-clouds/${CLOUD_NAME}.${service}.outputs"
         echo "record=${record}" >> "$GITHUB_OUTPUT"
         if [[ -f "${record}" ]]; then
           echo "found=true" >> "$GITHUB_OUTPUT"
-        elif [[ ( -n "${KUBECONFIG_SECRET}" && -z "${KUBECONFIG_CONTENT}" ) || ( -n "${NOVARC_SECRET}" && -z "${NOVARC}" ) || ( -n "${LXD_SECRET}" && -z "${LXD_CREDENTIALS}" ) ]]; then
+        elif [[ ( -n "${KUBECONFIG_SECRET_NAME}" && -z "${KUBECONFIG_CONTENT}" ) || ( -n "${NOVARC_SECRET_NAME}" && -z "${NOVARC}" ) || ( -n "${LXD_SECRET_NAME}" && -z "${LXD_CREDENTIALS}" ) ]]; then
           echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'."
           exit 1
         fi
