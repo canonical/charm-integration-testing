@@ -17,11 +17,8 @@ from bundle_builder_x import (
     CharmReleaseNotFoundException,
     IntegrationSpec,
     ModelSpec,
-    ReleaseUnavailableError,
-    ReleaseUnavailableKind,
     Solution,
     SpecFile,
-    leaf_release_errors,
 )
 from bundle_builder_x import (
     JujuVersion as BundleJujuVersion,
@@ -140,13 +137,6 @@ def target_bundle_charm_selectors(target_bundle: Path, target_application: str) 
     return _TargetCharmSelectors.model_validate(bundle.applications[target_application])
 
 
-def _has_unexpected_store_response(error: CharmReleaseNotFoundException) -> bool:
-    return any(
-        isinstance(cause, ReleaseUnavailableError) and cause.kind == ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE
-        for cause in leaf_release_errors(error)
-    )
-
-
 @pytest.fixture(scope="session")
 def target_resolved_charm(
     request: pytest.FixtureRequest,
@@ -181,9 +171,7 @@ def target_resolved_charm(
             charm_revision=application.revision,
             ubuntu_version=application.base.removeprefix("ubuntu@") if application.base is not None else None,
         )
-    except CharmReleaseNotFoundException as exc:
-        if _has_unexpected_store_response(exc):
-            raise
+    except CharmReleaseNotFoundException:
         return None
 
 
