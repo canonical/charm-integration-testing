@@ -24,10 +24,14 @@ baseline is the query below.
 Exclude results already linked to open `wontfix` issues in
 `canonical/charm-integration-testing`; those are accepted.
 
-- The MCP `search_test_results` tool takes `execution_metadata` as
-  base64-encoded `category:value` strings. Keys in this skill are written
-  without the `charm_qa:` scope prefix that CI adds when posting them; add it
-  when building the filter if the unprefixed one matches nothing.
+- Query with `search_test_results`, using
+  `template_ids=["charm_integration_testing.test_suite.test_deploy"]`,
+  `test_result_statuses=["FAILED"]`, and `execution_metadata` entries of the form
+  `base64(category):base64(value)`. Keys in this skill are written without the
+  `charm_qa:` prefix that CI adds when posting them, but Test Observer stores
+  them prefixed, so the filter category must include it. For example,
+  `base64("charm_qa:failure:charm"):base64("<X>")`. An unprefixed category
+  matches nothing.
 - `failure:charm` is only emitted for `JujuWaitTimeoutError`
   (`record_failure_execution_metadata` in
   `charm_integration_testing/test_suite/conftest.py`). Other exceptions emit
@@ -63,7 +67,7 @@ triage's job.
 1. **Baseline.** Run the counting query with `search_test_results`, then
    intersect execution IDs with PASSED `test_build_bundle` results and drop
    accepted (`wontfix`) results. Record the exact filters (including the
-   base64 metadata values), the date run, the resulting executions, and the
+   encoded metadata filters), the date run, the resulting executions, and the
    affected bundles (target/neighbor charm pairs, environments).
 
 2. **Group into signatures.** Group by the metadata values above, then pick one
@@ -84,8 +88,12 @@ triage's job.
      GitHub job summary also prints them, best effort. Pass them with
      `--target-bundle` / `--neighbor-bundle`
      and start from `--current-state no_controller` so `test_build_bundle`
-     does not regenerate them. TODO: confirm the exact location of the saved
-     bundles reachable through the Test Observer MCP.
+     does not regenerate them. TODO: the logs URL
+     (`charm.logs.test-observer.canonical.com`) currently returns 403 to
+     `download_and_extract_juju_logs`, so there is no MCP path to the saved
+     bundles yet. Do not bypass the 403. If the bundles can't be fetched, record
+     that and use the current-code attempt. TODO: confirm in a live run that
+     `--current-state no_controller` deploys the given bundle unchanged.
    - **Current-code attempt (second, or instead):** generate a new bundle from
      current code (`--current-state no_bundle`). This answers "does current
      code still fail". A bundle-generation failure means the original deploy
@@ -139,7 +147,10 @@ triage's job.
 8. **Pipeline verification (separate entry point,** e.g. "verify SQT-xxxx"),
    after the fix merged. Resume by reading the ticket's comment threads.
    Request reruns of the representative executions only with
-   `create_rerun_requests` (`test_execution_ids`). When they finish, check
+   `create_rerun_requests` (`test_execution_ids`), skipping executions that
+   already show `is_rerun_requested`. If the request is denied, report it to
+   the user and stop. TODO: confirm that rerun requests are permitted. When the
+   reruns finish, check
    whether each rerun still matches its signature; getting past the original
    error is success. STOP before posting: show the draft reply to the
    signature's comment and post it only after the user approves.
@@ -192,7 +203,9 @@ signature's Jira comment.
 
 ## Known gaps (v0)
 
-- TODO: exact location of saved bundles reachable through the Test Observer MCP.
+- TODO: MCP access to saved bundles (the logs URL currently returns 403).
+- TODO: live check of the `--current-state no_controller` bundle replay.
+- TODO: rerun-request permission.
 - TODO: dedicated skill for `bundle_builder_x` fixes.
 - TODO: dedicated log-triage skill for `JujuWaitTimeoutError`.
 - TODO: "typical filtering" for the epic pass rate beyond `wontfix`.
