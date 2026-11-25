@@ -432,6 +432,67 @@ def test_unavailable_pinned_revision_returns_none(pytester: pytest.Pytester) -> 
     result.assert_outcomes(passed=1)
 
 
+@pytest.mark.parametrize("nested", [False, True], ids=["direct-response", "nested-response"])
+def test_unexpected_charmhub_response_remains_an_error(pytester: pytest.Pytester, nested: bool) -> None:
+    # GIVEN a saved bundle whose Charmhub lookup receives an unexpected store response
+    bundle = pytester.path / "saved.yaml"
+    bundle.write_text("applications:\n  target:\n    charm: nrpe\n    revision: 100\n")
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + dedent(f"""
+        from bundle_builder_x import ReleaseRequest, ReleaseUnavailableError, ReleaseUnavailableKind
+
+        @pytest.fixture(scope="session")
+        def charmhub_client():
+            class UnexpectedResponse:
+                def charm_from_store(self, **kwargs):
+                    request = ReleaseRequest(charm_name="nrpe")
+                    unexpected = ReleaseUnavailableError(
+                        kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+                        request=request,
+                        detail="Synthetic malformed store response",
+                    )
+                    if {nested!r}:
+                        raise ReleaseUnavailableError(
+                            kind=ReleaseUnavailableKind.TRACK_NOT_FOUND,
+                            request=request,
+                            detail="Synthetic track lookup failure",
+                            causes=(unexpected,),
+                        )
+                    raise unexpected
+            return UnexpectedResponse()
+        """)
+    )
+    pytester.makepyfile(
+        """
+        def test_target_resolution(target_resolved_charm):
+            pass
+        """
+    )
+
+    # WHEN resolving the pinned release
+    result = pytester.runpytest(
+        "--current-state",
+        "deployed",
+        "--target-controller",
+        "existing",
+        "--target-model",
+        "existing",
+        "--target-application",
+        "target",
+        "--target-platform",
+        "machine",
+        "--target-bundle",
+        str(bundle),
+        "-q",
+    )
+
+    # THEN the unexpected store response propagates instead of returning None
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*ReleaseUnavailableError*"])
+
+
 def test_target_downgrade_uses_compatible_historical_revision(pytester: pytest.Pytester) -> None:
     # GIVEN the historical revision list includes an incompatible candidate first
     pytester.makeconftest(
