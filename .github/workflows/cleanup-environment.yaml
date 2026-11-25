@@ -188,6 +188,7 @@ jobs:
             echo "No nodes found, skipping orphan cleanup"
             exit 0
           fi
+          failed_nodes=()
           while IFS= read -r node; do
             echo "==> Checking node: $node"
             debug_status=0
@@ -230,16 +231,20 @@ jobs:
             fi
 
             # Wait up to 5 minutes for the pod to finish, then print its logs
-            kubectl wait "pod/$pod_name" \
+            if ! kubectl wait "pod/$pod_name" \
               --for=jsonpath='{.status.phase}'=Succeeded \
-              --timeout=5m 2>/dev/null \
-              || kubectl wait "pod/$pod_name" \
-                   --for=jsonpath='{.status.phase}'=Failed \
-                   --timeout=10s 2>/dev/null \
-              || true
+              --timeout=5m 2>/dev/null; then
+              phase=$(kubectl get "pod/$pod_name" --output jsonpath='{.status.phase}' || true)
+              echo "::error::Orphan cleanup did not complete on $node (pod phase: ${phase:-unknown})"
+              failed_nodes+=("$node")
+            fi
             kubectl logs "pod/$pod_name" || echo "  Warning: could not retrieve logs for $pod_name"
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
+          if (( ${#failed_nodes[@]} > 0 )); then
+            echo "::error::Orphan cleanup failed on: ${failed_nodes[*]}"
+            exit 1
+          fi
       - name: Find all model and controller namespaces older than the age threshold
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
