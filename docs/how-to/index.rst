@@ -10,3 +10,4 @@ running and debugging tests and charms.
    run-and-debug-tests-locally
    use-bundle-builder-x
    issue-categories
+   triage-policies
