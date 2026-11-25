@@ -74,16 +74,24 @@ runs:
         s3-secret-name: ${{ steps.info.outputs.s3-secret-name }}
         features: ${{ inputs.features }}
         cloud-name: ${{ steps.info.outputs.cloud-name }}
+    - name: Setup Local Cloud
+      id: setup-local
+      if: ${{ steps.info.outputs.setup-mode == 'local' }}
+      uses: ./.github/actions/setup-environment/setup-local
+      with:
+        features: ${{ inputs.features }}
+        cloud-name: ${{ steps.info.outputs.cloud-name }}
+        platform: ${{ steps.info.outputs.platform }}
     - name: Export cloud configuration
       id: result
       shell: bash
       env:
         CLOUD_NAME: ${{ steps.info.outputs.cloud-name }}
-        KUBECONFIG_PATH: ${{ steps.setup-remote.outputs.kubeconfig_path }}
+        KUBECONFIG_PATH: ${{ steps.setup-remote.outputs.kubeconfig_path || (steps.info.outputs.platform == 'kubernetes' && steps.setup-local.outputs.kubeconfig_path) || '' }}
         CLOUD_DEFINITION_PATH: ${{ steps.setup-remote.outputs.cloud-definition-path }}
         CLOUD_CREDENTIALS_PATH: ${{ steps.setup-remote.outputs.credentials-path }}
         METADATA_SOURCE: ${{ steps.setup-remote.outputs.metadata-source }}
-        S3_CONFIG_PATH: ${{ steps.setup-remote.outputs.s3-config-path }}
+        S3_CONFIG_PATH: ${{ steps.setup-remote.outputs.s3-config-path || steps.setup-local.outputs.s3-config-path }}
       run: |-  # zizmor: ignore[github-env] values are runner-created paths and cloud names from static/environments.yaml
         suffix="${CLOUD_NAME//-/_}"
         export_path() {

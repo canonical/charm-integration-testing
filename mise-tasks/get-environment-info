@@ -11,10 +11,11 @@ jq -ce --arg name "${ENVIRONMENT_NAME}" '
   def configured: type == "string" and length > 0;
   if . == null then error("Unknown environment \($name)")
   elif .platform == null then error("Environment \($name) needs a platform")
-  elif .["setup-mode"] != "remote" then
+  elif .["setup-mode"] != "remote" and .["setup-mode"] != "local" then
     error("Unsupported setup mode \(.["setup-mode"]) for environment \($name)")
   elif (.cloud | valid_cloud_name | not) then
     error("Environment \($name) needs a lowercase, hyphenated cloud name")
+  elif .["setup-mode"] == "local" then .
   elif ([.["kubeconfig-secret"], .["novarc-secret"], .["lxd-secret"]]
         | all(. == null or type == "string") | not) then
     error("Environment \($name) credential fields must be strings")
