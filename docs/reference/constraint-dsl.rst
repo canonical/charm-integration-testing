@@ -309,20 +309,18 @@ Endpoint feature set
    features(RelationSet)       ->  Set[Str]
 
 The set of distinct features active across all relations on the named endpoint.
-Features must be declared in the endpoint's ``features:`` list in overrides; this
+Features must be declared in an endpoint's ``features:`` list in overrides; this
 closed-world declaration is what allows features to be encoded as ``z3.Bool`` variables
 rather than Z3 string variables.
 
-The ``features:`` declaration also automatically generates a structural constraint:
-``endpoint_integrated => feature_x`` for each declared feature. The DSL ``features()``
-function is used to further constrain *which* features must or must not be active:
+The DSL ``features()`` function constrains *which* features must or must not be active:
 
 .. code-block:: yaml
 
    requires:
      admin:
        optional: false
-       features: ["admin"]   # declares the feature universe; generates integrated => feature_admin
+       features: ["admin"]
    constraints:
      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}  # pins to exactly this feature set
 
@@ -335,7 +333,7 @@ The two mechanisms have distinct roles:
    * - Mechanism
      - Role
    * - ``features: [...]`` on endpoint
-     - Declares feature universe; enables boolean encoding; generates ``integrated => feature_x``
+     - Declares the feature universe and enables boolean encoding
    * - ``features(endpoint[x]) == {...}`` in DSL
      - Restricts which features may be active; prevents undeclared combinations
 
