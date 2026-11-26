@@ -79,7 +79,10 @@ triage's job.
 
 2. **Group into signatures.** Group by the metadata values above, then pick one
    representative execution per signature. Check that the representative's
-   own status values match its signature before reproducing it. Use `get_test_execution`,
+   own status values match its signature before reproducing it. Record each
+   signature's latest occurrence. If a signature has stopped occurring, check
+   newer executions of the same target/neighbor pair and merged changes
+   (e.g. overrides) before reproducing; it may already be fixed or excluded. Use `get_test_execution`,
    `download_and_extract_juju_logs`, `search_juju_logs`, and
    `read_juju_log_file` to look past `JujuWaitTimeoutError` to the app and
    status actually blocking the deployment. Record the initial label now; the
@@ -108,7 +111,11 @@ triage's job.
      "No path from state NO_CONTROLLER". Match the original Juju version with
      `mise run juju:channel`. Bundles using `s3-integrator` need local S3
      (`setup-s3`, `S3_CONFIG_<cloud>`). If the bundles can't be fetched,
-     record that and use the current-code attempt.
+     record that and use the current-code attempt. Replay still applies the
+     current overrides and extensions (e.g. `istio_mesh` adds charms, and
+     assumes checks use current overrides), so it is not an exact replay. If
+     those block the deploy, record `blocked-other-error` with the commit that
+     introduced the block; do not edit overrides to get around it.
    - **Current-code attempt (second, or instead):** generate a new bundle from
      current code (`--current-state no_bundle`). This answers "does current
      code still fail". A bundle-generation failure means the original deploy
