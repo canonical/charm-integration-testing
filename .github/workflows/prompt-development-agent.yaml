@@ -1,0 +1,62 @@
+---
+name: Prompt development agent
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Task for the development agent
+        required: true
+        type: string
+      model:
+        description: OpenRouter model with tool calling and streaming support
+        required: true
+        default: anthropic/claude-sonnet-4.5
+        type: string
+permissions:
+  contents: read
+jobs:
+  agent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up tools
+        uses: ./.github/actions/setup-mise
+        with:
+          groups: development integration agent
+      - name: Prepare output directory
+        id: prepare
+        run: mkdir -p "$RUNNER_TEMP/agent-output/artifacts"
+      - name: Run agent
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          COPILOT_MODEL: ${{ inputs.model }}
+          COPILOT_PROVIDER_BASE_URL: https://openrouter.ai/api/v1
+          COPILOT_PROVIDER_TYPE: openai
+          COPILOT_PROVIDER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          COPILOT_AUTO_UPDATE: 'false'
+        run: |-
+          set -euo pipefail
+          [[ -n "$COPILOT_PROVIDER_API_KEY" ]] || {
+            echo "::error::Set the OPENROUTER_API_KEY repository secret."
+            exit 1
+          }
+          printf -v task '%s\n\nSave any files to return, such as a git patch, in %s/artifacts. Do not put credentials in the output.' \
+            "$PROMPT" "$RUNNER_TEMP/agent-output"
+          mise exec -- bash mise-tasks/agent "$task" -- --silent \
+            --secret-env-vars=COPILOT_PROVIDER_API_KEY \
+            > "$RUNNER_TEMP/agent-output/response.md"
+          [[ -s "$RUNNER_TEMP/agent-output/response.md" ]] || {
+            echo "::error::The agent returned an empty response."
+            exit 1
+          }
+      - name: Upload response and artifacts
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: development-agent-output
+          path: ${{ runner.temp }}/agent-output/
+          if-no-files-found: warn
