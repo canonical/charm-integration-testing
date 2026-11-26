@@ -172,7 +172,7 @@ triage's job.
    `create_rerun_requests` (`test_execution_ids`), skipping executions whose
    `get_test_execution` shows `is_rerun_requested` (`get_rerun_requests` is
    capped at 1000 rows, so absence there proves nothing). If the request is denied, report it to
-   the user and stop. TODO: confirm that rerun requests are permitted. When the
+   the user and stop. When the
    reruns finish, check
    whether each rerun still matches its signature; getting past the original
    error is success. STOP before posting: show the draft reply to the
@@ -227,7 +227,6 @@ signature's Jira comment.
 ## Known gaps (v0)
 
 - TODO: MCP access to saved bundles (the logs URL currently returns 403).
-- TODO: rerun-request permission.
 - TODO: dedicated skill for `bundle_builder_x` fixes.
 - TODO: dedicated log-triage skill for `JujuWaitTimeoutError`.
 - TODO: "typical filtering" for the epic pass rate beyond `wontfix`.
