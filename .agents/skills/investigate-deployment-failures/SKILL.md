@@ -223,10 +223,30 @@ signature's Jira comment.
 - Do not commit, push, open PRs, file issues, or post to Jira without the
   stops above.
 
+## Skill notes (temporary)
+
+Collect evidence for the future log-triage and `bundle_builder_x` skills.
+Append to `$HOME/.local/share/charm-qa-investigations/<jira-key>.md`, one
+heading per signature, after diagnosing it (steps 2–3) and after any
+`bundle_builder_x` fix (step 5). These notes stay local; never post them to
+Jira or commit them. Keep each item to one line; write "n/a" when it does not
+apply.
+
+- **Log triage:** logs and files that helped; searches or patterns that found
+  the blocking cause; chain from the timeout to the cause (status, app, log
+  line); dead ends; whether the initial label named the wrong charm.
+- **Bundle builder:** symptom, and whether it appeared at bundle generation or
+  at deploy; faulty module or function; how it was confirmed; fix PR and
+  tests added.
+
+Remove this section once both skills are drafted.
+
 ## Known gaps (v0)
 
-- TODO: dedicated skill for `bundle_builder_x` fixes.
-- TODO: dedicated log-triage skill for `JujuWaitTimeoutError`.
+- TODO: dedicated skill for `bundle_builder_x` fixes (collecting evidence via
+  Skill notes).
+- TODO: dedicated log-triage skill for `JujuWaitTimeoutError` (collecting
+  evidence via Skill notes).
 - TODO: "typical filtering" for the epic pass rate beyond `wontfix`.
 
 ## Output
@@ -235,4 +255,5 @@ signature's Jira comment.
 - Per signature: filter, representative execution, initial label, confirmed
   cause and class, attempts with outcomes, fix and status.
 - Drafted (or, if approved, posted) Jira comments.
+- Path of the local skill notes file.
 - Cleanup status; state clearly what was not committed, pushed, or posted.
