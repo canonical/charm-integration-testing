@@ -16,7 +16,6 @@ class ReleaseUnavailableKind(str, Enum):
     CHANNEL_NOT_FOUND = "channel_not_found"
     TRACK_NOT_FOUND = "track_not_found"
     DEFAULT_RELEASE_NOT_FOUND = "default_release_not_found"
-    UNEXPECTED_STORE_RESPONSE = "unexpected_store_response"
 
 
 @dataclass(frozen=True)

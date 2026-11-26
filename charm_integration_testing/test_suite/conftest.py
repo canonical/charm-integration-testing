@@ -1399,7 +1399,6 @@ def _release_resolution_metadata(error: CharmReleaseNotFoundException, charm_nam
                     ReleaseUnavailableKind.CHANNEL_NOT_FOUND: ("architecture", "base", "channel"),
                     ReleaseUnavailableKind.TRACK_NOT_FOUND: ("architecture", "base", "track", "revision"),
                     ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND: ("architecture", "base"),
-                    ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE: ("architecture",),
                 }
                 for field in request_fields_by_kind[leaf.kind]:
                     add(field, getattr(request, field))
