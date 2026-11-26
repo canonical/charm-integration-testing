@@ -95,11 +95,10 @@ triage's job.
    - **Replay attempt (first):** reuse the bundle the failing execution
      deployed. CI copies `generated-target-bundle.yaml` and
      `generated-neighbor-bundle.yaml` into `logs/`, uploaded to the `charm-qa`
-     Swift bucket under `<test_observer_environment>/<execution_id>`. TODO:
-     that logs URL (`charm.logs.test-observer.canonical.com`) currently
-     returns 403 to `download_and_extract_juju_logs`; do not bypass it.
-     Fallback: the CI job log prints both bundles after `Bundle content:`;
-     fetch it with
+     Swift bucket under `<test_observer_environment>/<execution_id>`; fetch
+     them with `download_and_extract_juju_logs`. If that fails, record why
+     (do not bypass access errors) and fall back to the CI job log, which
+     prints both bundles after `Bundle content:`; fetch it with
      `gh api repos/canonical/charm-integration-testing/actions/jobs/<job_id>/logs`.
      This is logged text, not the saved file. The neighbor bundle's `saas` URL
      names the original models: pin `--target-controller`, `--target-model`
@@ -226,7 +225,6 @@ signature's Jira comment.
 
 ## Known gaps (v0)
 
-- TODO: MCP access to saved bundles (the logs URL currently returns 403).
 - TODO: dedicated skill for `bundle_builder_x` fixes.
 - TODO: dedicated log-triage skill for `JujuWaitTimeoutError`.
 - TODO: "typical filtering" for the epic pass rate beyond `wontfix`.
