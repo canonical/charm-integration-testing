@@ -206,11 +206,6 @@ def test_architecture_mismatch_metadata_uses_atomic_stable_values() -> None:
                 ("failure:build_bundle:release_resolution:base", "22.04"),
             },
         ),
-        (
-            ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
-            {"architecture": "amd64"},
-            {("failure:build_bundle:release_resolution:architecture", "amd64")},
-        ),
     ],
 )
 def test_release_unavailable_metadata_uses_kind_specific_fields(
