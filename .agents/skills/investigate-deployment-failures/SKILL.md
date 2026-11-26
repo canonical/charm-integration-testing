@@ -78,7 +78,8 @@ triage's job.
    affected bundles (target/neighbor charm pairs, environments).
 
 2. **Group into signatures.** Group by the metadata values above, then pick one
-   representative execution per signature. Use `get_test_execution`,
+   representative execution per signature. Check that the representative's
+   own status values match its signature before reproducing it. Use `get_test_execution`,
    `download_and_extract_juju_logs`, `search_juju_logs`, and
    `read_juju_log_file` to look past `JujuWaitTimeoutError` to the app and
    status actually blocking the deployment. Record the initial label now; the
@@ -98,16 +99,16 @@ triage's job.
      fetch it with
      `gh api repos/canonical/charm-integration-testing/actions/jobs/<job_id>/logs`.
      This is logged text, not the saved file. The neighbor bundle's `saas` URL
-     names the original models; rewrite it to the replay's model names.
-     Run with `--target-bundle` / `--neighbor-bundle`,
-     `--current-state no_controller`, and
-     `-k "test_deploy and not old_revision"`. The scheduler then plans
+     names the original models: pin `--target-controller`, `--target-model`
+     and `--neighbor-model`, and rewrite the URL to match. Run with
+     `--target-bundle` / `--neighbor-bundle`, `--current-state no_controller`,
+     and `-k "test_deploy and not old_revision"`. The scheduler then plans
      bootstrap, create model, and `test_deploy`. Without `-k`,
      `test_build_bundle` stays selected and the scheduler aborts with
-     "No path from state NO_CONTROLLER". TODO: confirm in a live run that the
-     given bundle is deployed unchanged. Match the original Juju version where
-     possible. If the bundles can't be fetched, record that and use the
-     current-code attempt.
+     "No path from state NO_CONTROLLER". Match the original Juju version with
+     `mise run juju:channel`. Bundles using `s3-integrator` need local S3
+     (`setup-s3`, `S3_CONFIG_<cloud>`). If the bundles can't be fetched,
+     record that and use the current-code attempt.
    - **Current-code attempt (second, or instead):** generate a new bundle from
      current code (`--current-state no_bundle`). This answers "does current
      code still fail". A bundle-generation failure means the original deploy
@@ -219,7 +220,6 @@ signature's Jira comment.
 ## Known gaps (v0)
 
 - TODO: MCP access to saved bundles (the logs URL currently returns 403).
-- TODO: live check that bundle replay deploys the given bundle unchanged.
 - TODO: rerun-request permission.
 - TODO: dedicated skill for `bundle_builder_x` fixes.
 - TODO: dedicated log-triage skill for `JujuWaitTimeoutError`.
