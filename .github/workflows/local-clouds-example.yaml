@@ -39,7 +39,7 @@ jobs:
       - name: Run charm tests
         run: |-
           KUBECONFIG_local_k8s="$HOME/.kube/config" VALIDATORS_PATH="$PWD/validators" \
-          mise run test:suite -- -k test_teardown \
+          mise run test:suite -- -k test_teardown --mermaid-output bundle.mmd \
             --target-cloud local-k8s \
             --target-charm postgresql-k8s --target-channel 14/stable \
             --target-application target --target-endpoint certificates \
