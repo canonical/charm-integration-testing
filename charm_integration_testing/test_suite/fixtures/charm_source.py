@@ -105,13 +105,13 @@ def _verify_charm_root(source_dir: Path, expected_name: str) -> None:
 
 @pytest.fixture(scope="session")
 def target_charm_source(
-    target_resolved_charm: Charm,
+    target_resolved_charm: Charm | None,
     juju_client: JujuClient,
     logger: logging.Logger,
     git_client: GitClient | None,
 ) -> Iterator[Path | None]:
     """Check out the source revision recorded in the target charm's packed version file."""
-    if git_client is None:
+    if target_resolved_charm is None or git_client is None:
         yield None
         return
     # Juju's snap cannot write to pytest's hidden /tmp paths.

@@ -14,17 +14,17 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED_WITH_OLD_REVISION, provides=State.DEPLOYED)
 def test_upgrade_charm(
     juju_client: JujuClient,
-    target_downgrade_revision: int,
+    target_downgrade_revision: int | None,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
-    target_channel: str | None,
-    target_resolved_charm: Charm,
+    target_resolved_charm_for_refresh: Charm | None,
 ) -> None:
-    # The resolved charm carries the concrete revision and channel even in a "latest release" run,
-    # where --target-revision/--target-channel are left at their defaults.
-    target_revision = target_resolved_charm.revision
-    resolved_target_channel = target_channel or str(target_resolved_charm.channel)
+    if target_downgrade_revision is None or target_resolved_charm_for_refresh is None:
+        pytest.skip("A resolvable target and compatible downgrade revision are required for the refresh cycle.")
+
+    target_revision = target_resolved_charm_for_refresh.revision
+    resolved_target_channel = str(target_resolved_charm_for_refresh.channel)
 
     # Upgrading the charm to the target revision specified by the fixture
     juju_client.logger.info(

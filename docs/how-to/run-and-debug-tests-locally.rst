@@ -214,13 +214,13 @@ Select ``-k test_live_memory_stress_moderate`` to run it.
 Lint the target charm's source
 --------------------------------
 
-``test_charmlint`` downloads the selected Charmhub revision to read its source
-repository and build-generated ``version`` file, then runs charmlint against
-a detached Git checkout instead of the extracted charm, so source-only files
-such as unit tests are included. Charmlint retains its default policy: errors
-fail; warnings do not. A separate ``test_charmlint_strict`` case uses
-``--strict`` and fails on warnings as well as errors. Both cases log the full
-charmlint output and share the same source checkout.
+``test_charmlint`` checks out the source revision recorded in the selected
+Charmhub charm, so source-only files are included. The default case fails on
+errors; ``test_charmlint_strict`` also fails on warnings. Both log full output.
+
+Fresh runs share the synthesized target release across bundle export, lint,
+and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
+without rebuilding.
 
 The archive must declare one public HTTPS source repository and a clean commit,
 tag, or ``git describe`` version. Missing or unavailable provenance fails the
@@ -228,12 +228,17 @@ test; it does not fall back to the packed charm or a default branch. The source
 checkout must have the target charm at its root. Non-GitHub revisions are
 fetched directly first; only unresolved abbreviated revisions require scanning
 advertised refs, with blob filtering where supported by the Git server.
-The source fixture returns ``None`` if Git is unavailable, and the lint test
-decides to skip; source download and checkout errors otherwise fail the test.
+The source fixture returns ``None`` if Git or the target release cannot be
+resolved, and the lint test decides to skip; source download and checkout errors
+otherwise fail the test.
+
+The refresh fixture returns ``None`` when the target or saved revision is
+unavailable, and the consuming refresh tests decide to skip. Malformed bundles,
+missing provenance, download, checkout, and lint failures remain failures.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap
-a controller or model.
+a controller or model, but it does synthesize the full integration bundle.
 Select only the default case with ``-k 'test_charmlint and not strict'``, or
 only the strict case with ``-k test_charmlint_strict``.
 

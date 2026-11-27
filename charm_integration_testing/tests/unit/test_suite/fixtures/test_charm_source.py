@@ -375,9 +375,16 @@ def test_checkout_accepts_build_only_charmcraft(tmp_path: Path) -> None:
     module._verify_charm_root(tmp_path, "example")
 
 
-def test_missing_git_returns_none(pytester: pytest.Pytester) -> None:
+@pytest.mark.parametrize(
+    ("charm_available", "git_available"),
+    [(True, False), (False, True)],
+    ids=["missing-git", "unresolved-target"],
+)
+def test_unavailable_source_prerequisite_returns_none(
+    pytester: pytest.Pytester, charm_available: bool, git_available: bool
+) -> None:
     pytester.makeconftest(
-        """
+        f"""
         import logging
         from types import SimpleNamespace
         import pytest
@@ -389,6 +396,8 @@ def test_missing_git_returns_none(pytester: pytest.Pytester) -> None:
 
         @pytest.fixture(scope="session")
         def target_resolved_charm():
+            if not {charm_available!r}:
+                return None
             return SimpleNamespace(name="example", revision=1)
 
         @pytest.fixture(scope="session")
@@ -397,7 +406,7 @@ def test_missing_git_returns_none(pytester: pytest.Pytester) -> None:
 
         @pytest.fixture(scope="session")
         def git_client():
-            return None
+            return object() if {git_available!r} else None
         """
     )
     pytester.makepyfile(
