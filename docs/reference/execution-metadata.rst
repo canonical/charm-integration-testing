@@ -164,6 +164,14 @@ Failure Information
      - Status information for a specific charm when a test times out waiting for Juju. Format: ``application:<status>:<message>``, ``unit:<status>:<message>``, or ``unit_agent:<status>:<message>``. The message portion is normalized.
      - Partial
      - ``application:blocked:Init failed``
+   * - ``failure:migration:status``
+     - The source controller's latest migration status (``juju show-model``) when a migrated model does not appear on the target controller. ``not reported by source controller`` when the source no longer serves the model.
+     - Yes
+     - ``aborted, removing model from target controller: model data transfer failed, failed to migrate binaries: ...``
+   * - ``failure:migration:cause``
+     - The innermost error of ``failure:migration:status``, which is often truncated before it. Only recorded when the source reports a status.
+     - Yes
+     - ``model <UUID> has been removed``
    * - ``failure:cli:cmd``
      - The command that failed when a test fails due to a CLI error. Contains the command string.
      - Yes

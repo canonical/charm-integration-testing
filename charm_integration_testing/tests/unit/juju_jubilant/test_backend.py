@@ -1446,6 +1446,48 @@ class TestJubilantBackend:
             with pytest.raises(JujuWaitTimeoutError):
                 backend.wait_for_removal_of_units(TEST_MODEL, ["my-app"], timeout=timedelta(milliseconds=100))
 
+    class TestModelMigrationStatus:
+        @dataclass
+        class ShowModelStub:
+            migration: str = ""
+            error_stderr: str | None = None
+
+            def show_model(self) -> jubilant.ModelInfo:
+                if self.error_stderr is not None:
+                    raise jubilant.CLIError(1, ["juju", "show-model"], "", self.error_stderr)
+                return jubilant.ModelInfo(
+                    name=MY_MODEL.model,
+                    short_name=MY_MODEL.model,
+                    model_uuid="model-uuid",
+                    model_type="caas",
+                    controller_uuid="controller-uuid",
+                    controller_name=MY_MODEL.controller,
+                    is_controller=False,
+                    cloud="test-cloud",
+                    life="alive",
+                    status=jubilant.modeltypes.ModelStatusInfo(migration=self.migration),
+                )
+
+        @pytest.mark.parametrize(("migration", "expected"), [("aborted: boom", "aborted: boom"), ("", None)])
+        def test_returns_latest_migration_status(self, migration: str, expected: str | None) -> None:
+            stub = self.ShowModelStub(migration=migration)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            assert backend.model_migration_status(MY_MODEL) == expected
+
+        def test_returns_none_when_model_migrated_away(self) -> None:
+            stub = self.ShowModelStub(error_stderr="ERROR model my-model has been migrated to controller other-ctrl\n")
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            assert backend.model_migration_status(MY_MODEL) is None
+
+        def test_reraises_unrecognized_cli_error(self) -> None:
+            stub = self.ShowModelStub(error_stderr="ERROR connection to controller lost\n")
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with pytest.raises(jubilant.CLIError):
+                backend.model_migration_status(MY_MODEL)
+
     class TestWaitForModelToExist:
         def test_returns_when_status_succeeds(self) -> None:
             # GIVEN a backend whose status() immediately succeeds

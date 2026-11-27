@@ -26,12 +26,12 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
     def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
         self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
 
-    def post_migrate_model(self, model: str, _source: str, target: str) -> None:
+    def post_migrate_model(self, model: str, source: str, target: str) -> None:
         # Vault comes back sealed after migration; re-unseal without re-authorizing.
         # Wait for the model on the target controller first: migrate_model() returns
         # as soon as migration starts, so an immediate query can race the move.
+        self.vault_unsealer.juju.wait_for_model_migration(model, source, target, timeout=timedelta(minutes=15))
         target_model = JujuModelHandle(controller=target, model=model)
-        self.vault_unsealer.juju.wait_for_model_to_exist(target_model, timeout=timedelta(minutes=15))
         self.vault_unsealer.try_init_or_unseal_all_vaults(target_model, authorize_charm=False)
 
 

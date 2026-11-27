@@ -4,10 +4,11 @@
 import logging
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuMigrationError, JujuModelHandle
 from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from test_suite.conftest import (
     _bundle_diagnostic_metadata,
+    _migration_failure_metadata,
     _release_resolution_metadata,
     record_charm_info_execution_metadata_instantaneous,
 )
@@ -547,3 +548,27 @@ def test_record_charm_info_execution_metadata_raises_for_unknown_application() -
 
     with pytest.raises(KeyError):
         _record_metadata(_RecordCharmInfoBackend(applications, consumed_offers={}, integrations=integrations))
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (
+            "aborted, removing model from target controller: model data transfer failed: "
+            "model 75a43d9f-ccd9-4425-8c98-d768d2109e96 has been removed",
+            [
+                (
+                    "failure:migration:status",
+                    "aborted, removing model from target controller: model data transfer failed: "
+                    "model <UUID> has been removed",
+                ),
+                ("failure:migration:cause", "model <UUID> has been removed"),
+            ],
+        ),
+        (None, [("failure:migration:status", "not reported by source controller")]),
+    ],
+)
+def test_migration_failure_metadata(status: str | None, expected: list[tuple[str, str]]) -> None:
+    error = JujuMigrationError(JujuModelHandle(controller="src", model="m"), "dst", status)
+
+    assert _migration_failure_metadata(error) == expected
