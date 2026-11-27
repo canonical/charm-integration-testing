@@ -38,8 +38,10 @@ overrides:
       - 'bool(endpoint[receive-traces]) => bool(endpoint[cloud-config]) or bool(endpoint[send-traces])'
       - 'bool(endpoint[grafana-dashboards-consumer]) => bool(endpoint[grafana-dashboards-provider])
         or bool(endpoint[cloud-config])'
-      - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
-        | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      - 'charms(cross_model(endpoint[provide-cmr-mesh])) <= charms(cross_model(endpoint[receive-loki-logs]
+        | endpoint[receive-traces] | endpoint[receive-profiles]))'
+      - 'bool(endpoint[service-mesh]) => charms(cross_model(endpoint[receive-loki-logs]
+        | endpoint[receive-traces] | endpoint[receive-profiles])) <= charms(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
 
   # 0.130/dev add OTLP pipelines; risk-only default channels use Ubuntu 26.04.
@@ -72,6 +74,8 @@ overrides:
         or bool(endpoint[cloud-config])'
       - 'bool(endpoint[receive-otlp]) => bool(endpoint[cloud-config]) or bool(endpoint[send-otlp])
         or bool(endpoint[send-traces]) or bool(endpoint[send-loki-logs]) or bool(endpoint[send-remote-write])'
-      - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
-        | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      - 'charms(cross_model(endpoint[provide-cmr-mesh])) <= charms(cross_model(endpoint[receive-loki-logs]
+        | endpoint[receive-traces] | endpoint[receive-profiles]))'
+      - 'bool(endpoint[service-mesh]) => charms(cross_model(endpoint[receive-loki-logs]
+        | endpoint[receive-traces] | endpoint[receive-profiles])) <= charms(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'

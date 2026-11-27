@@ -4,7 +4,7 @@
 #
 # Tracks 1/2 predate these endpoints; block applies to 12.4+ and future tracks.
 #
-# provide-cmr-mesh must track metrics-endpoint/profiling-endpoint's cross-model status; see GH-980.
+# Mesh-enabled cross-model metrics and profiling require companions; see GH-980.
 overrides:
   - criteria:
       - none_of:
@@ -21,6 +21,8 @@ overrides:
     constraints:
       - 'bool(endpoint[require-cmr-mesh]) => bool(endpoint[service-mesh])'
       - 'bool(endpoint[provide-cmr-mesh]) => bool(endpoint[service-mesh])'
-      - 'charms(cross_model(endpoint[metrics-endpoint] | endpoint[profiling-endpoint]))
-        == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      - 'charms(cross_model(endpoint[provide-cmr-mesh])) <= charms(cross_model(endpoint[metrics-endpoint]
+        | endpoint[profiling-endpoint]))'
+      - 'bool(endpoint[service-mesh]) => charms(cross_model(endpoint[metrics-endpoint]
+        | endpoint[profiling-endpoint])) <= charms(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'

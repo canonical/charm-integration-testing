@@ -9,7 +9,7 @@
 # service-mesh (requires): optional - Istio service mesh integration, secondary to core alerting
 # provide-cmr-mesh (provides): optional - CMR mesh consumer hook, secondary to core alerting
 #
-# provide-cmr-mesh must track alerting/grafana-source/self-metrics-endpoint's cross-model status; see GH-980.
+# Mesh-enabled cross-model alerting, sources and metrics require companions; see GH-980.
 overrides:
   - criteria:
       - any_of:
@@ -25,6 +25,8 @@ overrides:
       provide-cmr-mesh:
         optional: true
     constraints:
-      - 'charms(cross_model(endpoint[alerting] | endpoint[grafana-source] | endpoint[self-metrics-endpoint]))
-        == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      - 'charms(cross_model(endpoint[provide-cmr-mesh])) <= charms(cross_model(endpoint[alerting]
+        | endpoint[grafana-source] | endpoint[self-metrics-endpoint]))'
+      - 'bool(endpoint[service-mesh]) => charms(cross_model(endpoint[alerting] | endpoint[grafana-source]
+        | endpoint[self-metrics-endpoint])) <= charms(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
