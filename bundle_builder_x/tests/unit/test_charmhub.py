@@ -1006,6 +1006,26 @@ class TestCharmhubClient:
 
             assert caught.value.error_code == error_code
             assert caught.value.request.charm_name == "ceph-mon"
+            assert caught.value.request.channel == "latest/stable"
+
+        @pytest.mark.parametrize("channel", [None, _CHANNEL], ids=["default", "explicit"])
+        @pytest.mark.parametrize(
+            "response",
+            [_ok_response(), _error_response("ceph-mon", "some-other-error", "unexpected")],
+            ids=["missing-error", "unexpected-error-code"],
+        )
+        def test_unexpected_store_response_preserves_channel(
+            self, channel: CharmChannel | None, response: RefreshResponse
+        ) -> None:
+            class StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return response
+
+            client = _make_client(StubClient())
+            with pytest.raises(UnexpectedStoreResponseError) as caught:
+                client._default_ubuntu_version("ceph-mon", "amd64", charm_channel=channel)
+
+            assert caught.value.request.channel == (str(channel) if channel is not None else None)
 
         def test_candidate_discovery_does_not_cache_unexpected_store_response(self) -> None:
             class StubClient(_NullHttpClient):

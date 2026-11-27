@@ -769,7 +769,11 @@ class CharmhubClient:
         # Extract bases from error response
         if refresh_info.error is None:
             raise UnexpectedStoreResponseError(
-                request=ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch),
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    channel=str(charm_channel) if charm_channel is not None else None,
+                ),
                 detail=f"Failed to find default bases for charm {charm_name}: no error returned",
             )
 
@@ -783,7 +787,11 @@ class CharmhubClient:
             bases = [release.base for release in refresh_info.error.extra.releases]
         else:
             raise UnexpectedStoreResponseError(
-                request=ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch),
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    channel=str(charm_channel) if charm_channel is not None else None,
+                ),
                 detail=(
                     f"Failed to find default bases for charm {charm_name}: "
                     f"unexpected error code {refresh_info.error.code}"
