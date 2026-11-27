@@ -19,7 +19,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: canonical/charm-integration-testing
-          ref: ${{ github.sha }}  # Product teams: pin a commit SHA
+          # When copying, replace with a commit SHA of charm-integration-testing.
+          ref: ${{ github.sha }}
           path: cit
           persist-credentials: false
       - name: Read mise version

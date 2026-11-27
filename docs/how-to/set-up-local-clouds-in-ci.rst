@@ -16,7 +16,8 @@ See the `sample workflow
 <https://github.com/canonical/charm-integration-testing/blob/main/.github/workflows/local-clouds-example.yaml>`_.
 It:
 
-1. Checks out this repository into ``cit/`` at a pinned commit.
+1. Checks out this repository into ``cit/``. The sample uses ``github.sha`` to
+   test itself; replace it with a pinned commit of this repository when copying.
 2. Installs the Mise version from ``cit/.mise-version``.
 3. Trusts only ``cit/``, and sets ``MISE_CEILING_PATHS`` to the workspace so
    that a ``mise.toml`` in your own repository is not merged in.
