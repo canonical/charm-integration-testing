@@ -135,6 +135,7 @@ _vm_exec_with_env() {
         shift
         project_hash="$(printf "%s" "$project_root" | sha256sum)"
         export PROJECT_ROOT="$project_root"
+        export CHARM_QA_ROOT="$project_root"
         export UV_PROJECT_ENVIRONMENT="${XDG_DATA_HOME:-$HOME/.local/share}/charm-integration-testing/venvs/${project_hash%% *}"
         cd "$project_root"
         exec "$@"
@@ -412,7 +413,7 @@ _cmd_up() {
     _vm_exec_with_env _env_args bash -lc "
         set -euo pipefail
         cd '$VM_MOUNT'
-        mise run setup -- --group sandbox development integration agent
+        mise run setup -- --group sandbox development integration agent skills
     "
 
     _require_github_auth

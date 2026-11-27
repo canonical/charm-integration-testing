@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+# shellcheck source=../environment.sh
+source "$SDK/environment.sh"
+
+revision="$(cat "$SDK/revision")"
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "Invalid Charm QA source revision: $revision" >&2
+    exit 1
+}
+toolkit="$CHARM_QA_HOME/toolkits/$revision"
+mkdir -p "$CHARM_QA_HOME/toolkits"
+
+# Editable workspace installs need writable source, not the read-only SDK mount.
+if [[ ! -d "$toolkit" ]]; then
+    staging="$(mktemp -d "$CHARM_QA_HOME/toolkits/.prepare-XXXXXX")"
+    trap 'rm -rf -- "$staging"' EXIT
+    cp -R "$SDK/toolkit/." "$staging/"
+    mv -T "$staging" "$toolkit"
+    trap - EXIT
+fi
+
+export PROJECT_ROOT="$toolkit"
+export UV_PROJECT_ENVIRONMENT="$toolkit/.venv"
+export MISE_TRUSTED_CONFIG_PATHS="$toolkit"
+cd "$toolkit"
+mise run setup -- --group development integration cloud-k8s skills
+
+# Keep the previous toolkit usable if installing a new revision fails.
+ln -sfnT "$toolkit" "$CHARM_QA_HOME/current"

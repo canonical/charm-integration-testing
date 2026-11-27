@@ -30,6 +30,44 @@ Groups compose, for example `mise run setup -- --group development integration`.
 The `runtime` group installs runtime project dependencies; `development` also
 installs development extras and shared tooling, taking precedence when combined.
 
+The `workshop` group installs LXD, Workshop and SDKcraft for SDK development.
+It can refresh an existing LXD snap to the catalogue channel, but does not
+initialize LXD or launch Workshop environments.
+
+### Agent tools and skills
+
+Inside the environment where the agent will run:
+
+```bash
+mise run setup -- --group agent skills
+```
+
+The `agent` group installs Copilot; `skills` independently registers this
+checkout's skills in `~/.agents/skills` and `~/.claude/skills`. Omit `agent`
+when using another client or an agent supplied by a Workshop SDK.
+`mise run setup-skills` performs only registration; `-- --check` checks
+conflicts without changing anything.
+
+Registration refuses existing same-name content it does not own. It updates
+owned symlinks to the selected checkout and removes only owned links for
+skills no longer shipped. Unrelated skills are left untouched. Run it explicitly
+when selecting a different toolkit; only one toolkit's skills are active per user.
+
+For framework development, work in this checkout. When developing a charm,
+keep its checkout as the working directory and select the toolkit explicitly:
+
+```bash
+export CHARM_QA_ROOT=/absolute/path/to/charm-integration-testing
+mise -C "$CHARM_QA_ROOT" run test:suite -- --help
+```
+
+Mise exports `CHARM_QA_ROOT` and `PROJECT_ROOT` for commands it launches.
+An agent started separately must inherit `CHARM_QA_ROOT`, as exported above.
+Preserve any environment-specific `UV_PROJECT_ENVIRONMENT`. No global Mise
+configuration or charm files are modified.
+
+### Project dependencies
+
 Workspace packages are installed editably in both runtime and development setup,
 so Python source edits are available without reinstalling. Rerun setup after
 changing dependencies, entry points or other package metadata.

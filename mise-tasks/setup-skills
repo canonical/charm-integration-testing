@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#MISE description="Register toolkit skills for agents in this environment"
+#MISE raw_args=true
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+check=false
+case "${1:-}" in
+    --check) check=true; shift ;;
+    --help|-h)
+        echo "Usage: mise run setup-skills -- [--check]"
+        echo "Register skills in ~/.agents/skills and ~/.claude/skills; --check only checks conflicts."
+        exit 0
+        ;;
+esac
+if (( $# )); then
+    echo "Unexpected argument: $1" >&2
+    exit 1
+fi
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+state="${XDG_DATA_HOME:-$HOME/.local/share}/charm-integration-testing/skills"
+skills="$state/current"
+directories=("$HOME/.agents/skills" "$HOME/.claude/skills")
+
+shopt -s nullglob
+sources=("$project_root/.agents/skills/"*/SKILL.md)
+if (( ${#sources[@]} == 0 )); then
+    echo "No toolkit skills found in $project_root/.agents/skills." >&2
+    exit 1
+fi
+for directory in "${directories[@]}"; do
+    if [[ ( -e "$directory" || -L "$directory" ) && ! -d "$directory" ]]; then
+        echo "Skill directory conflicts with $directory; move it aside before retrying setup." >&2
+        exit 1
+    fi
+    for source in "${sources[@]}"; do
+        name="$(basename "$(dirname "$source")")"
+        target="$directory/$name"
+        if [[ -e "$target" || -L "$target" ]]; then
+            if [[ ! -L "$target" || "$(readlink "$target")" != "$skills/$name" ]]; then
+                echo "Toolkit skill conflicts with $target; move it aside before retrying setup." >&2
+                exit 1
+            fi
+        fi
+    done
+done
+if [[ -e "$skills" && ! -L "$skills" ]]; then
+    echo "Toolkit skill source conflicts with $skills; move it aside before retrying setup." >&2
+    exit 1
+fi
+[[ "$check" == false ]] || exit 0
+
+mkdir -p "$state"
+ln -sfnT "$project_root/.agents/skills" "$skills"
+for directory in "${directories[@]}"; do
+    mkdir -p "$directory"
+    for target in "$directory/"*; do
+        name="$(basename "$target")"
+        if [[ -L "$target" && "$(readlink "$target")" == "$skills/$name" \
+            && ! -f "$skills/$name/SKILL.md" ]]; then
+            rm -- "$target"
+        fi
+    done
+    for source in "$skills/"*/SKILL.md; do
+        name="$(basename "$(dirname "$source")")"
+        [[ -L "$directory/$name" ]] || ln -s "$skills/$name" "$directory/$name"
+    done
+done

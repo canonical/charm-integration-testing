@@ -1,0 +1,12 @@
+---
+name: charm-qa
+base: ubuntu@24.04
+runtime: lxd-container
+sdks:
+  - name: try-charm-qa
+  - name: copilot
+    channel: latest/stable
+actions:
+  tasks: mise -C "$CHARM_QA_ROOT" tasks ls
+  qa: mise -C "$CHARM_QA_ROOT" run "$@"
+  agent: copilot "$@"
