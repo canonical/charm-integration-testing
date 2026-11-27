@@ -333,12 +333,12 @@ class BundleBuilder:
                     diagnostics.append(UnresolvedIntegrationDiagnostic(endpoints=endpoints))
         if not diagnostics:
             raise UncompletableBundleError(
-                diagnostics=(
+                diagnostics=[
                     BundleBuildFailureDiagnostic(
                         kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
                         detail="Cannot expand the domain to handle failed assertion tags",
                     ),
-                ),
+                ],
             )
         return canonicalize_diagnostics(diagnostics)
 

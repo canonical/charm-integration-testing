@@ -1,0 +1,69 @@
+import logging
+import zipfile
+from types import SimpleNamespace
+
+import pytest
+import requests
+from bundle_builder_x import (
+    ApplicationReleaseDiagnostic,
+    BundleBuildFailureDiagnostic,
+    BundleBuildFailureKind,
+    CharmReleaseNotFoundException,
+    UncompletableBundleError,
+)
+from test_suite.fixtures.charm_source import target_charm_source
+
+
+@pytest.fixture(scope="session")
+def logger():
+    return logging.getLogger("charmlint-resolution")
+
+
+@pytest.fixture(scope="session")
+def git_client():
+    class GitStub:
+        def checkout(self, *args):
+            raise RuntimeError("Checkout failed")
+
+    return GitStub()
+
+
+@pytest.fixture(scope="session")
+def target_resolved_charm():
+    if stage == "resolution":
+        raise requests.HTTPError("Charmhub unavailable")
+    if stage == "invalid-bundle":
+        raise ValueError("Invalid saved bundle")
+    if stage in ("solver-timeout", "optimization", "mixed-diagnostics"):
+        kind = (
+            BundleBuildFailureKind.OPTIMIZATION_UNSATISFIABLE
+            if stage == "optimization"
+            else BundleBuildFailureKind.SOLVER_TIMEOUT
+        )
+        diagnostics = [BundleBuildFailureDiagnostic(kind=kind, detail=message)]
+        if stage == "mixed-diagnostics":
+            diagnostics.append(
+                ApplicationReleaseDiagnostic(
+                    application="target",
+                    charm_name="example",
+                    model="model",
+                    error=CharmReleaseNotFoundException("Missing release"),
+                )
+            )
+        raise UncompletableBundleError(diagnostics)
+    return SimpleNamespace(name="example", revision=1)
+
+
+class JujuStub:
+    def download_charm(self, name, revision, destination):
+        if stage == "download":
+            raise CharmReleaseNotFoundException("Download failed")
+        with zipfile.ZipFile(destination, "w") as archive:
+            archive.writestr("metadata.yaml", "name: example\nsource: https://example.com/repo")
+            if stage == "checkout":
+                archive.writestr("version", "abcdef0")
+
+
+@pytest.fixture(scope="session")
+def juju_client():
+    return JujuStub()
