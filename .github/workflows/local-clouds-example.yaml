@@ -42,6 +42,6 @@ jobs:
           mise run test:suite -- -k test_teardown --mermaid-output bundle.mmd \
             --target-cloud local-k8s \
             --target-charm postgresql-k8s --target-channel 14/stable \
-            --target-application target --target-endpoint certificates \
-            --neighbor-charm self-signed-certificates \
-            --neighbor-application neighbor --neighbor-endpoint certificates
+            --target-application target --target-endpoint database \
+            --neighbor-charm data-integrator \
+            --neighbor-application neighbor --neighbor-endpoint postgresql
