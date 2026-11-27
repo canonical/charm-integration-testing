@@ -7,6 +7,30 @@
 set -euo pipefail
 umask 077
 
+output=""
+while (( $# )); do
+    case "$1" in
+        --output)
+            if (( $# < 2 )) || [[ -z "$2" ]]; then
+                echo "--output requires a value" >&2
+                exit 1
+            fi
+            output="$2"
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: mise run setup-s3 -- [--output FILE]"
+            echo "Append s3-config-path to FILE after the service has been verified."
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
 state="${HOME}/.local/share/charmqa-s3"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 for command in jq uv; do
@@ -169,5 +193,8 @@ env_tmp="$(mktemp "${state}/s3.env.XXXXXX")"
 temporary_files+=("${env_tmp}")
 printf 'export S3_CONFIG_localhost=%q\n' "${state}/s3.conf" > "${env_tmp}"
 mv "${env_tmp}" "${state}/s3.env"
+if [[ -n "${output}" ]]; then
+    printf 's3-config-path=%s\n' "${state}/s3.conf" >> "${output}"
+fi
 echo "Load the localhost cloud's S3 config path with: source ${state}/s3.env"
 echo "This service is for this disposable VM only; do not expose it publicly."

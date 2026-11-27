@@ -30,7 +30,7 @@ def _run_charmlint(request: pytest.FixtureRequest, logger: logging.Logger, *, st
     if charm_source is None:
         pytest.skip("Git or the target charm could not be resolved for linting.")
     result = run(  # nosec B603
-        [charmlint, str(charm_source), *(["--strict"] if strict else [])],
+        [charmlint, str(charm_source)] + (["--strict"] if strict else []),
         stdout=PIPE,
         stderr=STDOUT,
         text=True,
