@@ -28,6 +28,33 @@ simultaneously.
    ``- 'features(endpoint[admin]) == {"admin"}'``
    ``- 'config[num-history-shards] in {1, 2, 4, 8}'``
 
+Endpoint-specific overrides and constraints
+-------------------------------------------
+
+An endpoint override normally requires the named endpoint to exist in charm
+metadata. For endpoints removed in some supported revisions, explicitly set
+``if_present: true`` to apply the override only when the endpoint exists in the
+corresponding ``requires`` or ``provides`` section. This does not create an endpoint.
+
+Place constraints that depend on that endpoint inside its override:
+
+.. code-block:: yaml
+
+   requires:
+     ingress:
+       if_present: true
+       optional: true
+       features: [sdi-legacy]
+       constraints:
+         - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+
+These constraints use the same charm-wide DSL context as top-level constraints,
+but are included only when the endpoint exists in that direction in the metadata.
+``if_present`` defaults to false, so other stale endpoint overrides still raise an
+error. ``optional: true`` alone allows an existing endpoint to remain unconnected;
+it does not allow an absent endpoint in an override. Top-level constraints remain
+unconditional and are not automatically filtered for missing endpoint references.
+
 Z3 encoding
 -----------
 
@@ -282,20 +309,18 @@ Endpoint feature set
    features(RelationSet)       ->  Set[Str]
 
 The set of distinct features active across all relations on the named endpoint.
-Features must be declared in the endpoint's ``features:`` list in overrides; this
+Features must be declared in an endpoint's ``features:`` list in overrides; this
 closed-world declaration is what allows features to be encoded as ``z3.Bool`` variables
 rather than Z3 string variables.
 
-The ``features:`` declaration also automatically generates a structural constraint:
-``endpoint_integrated => feature_x`` for each declared feature. The DSL ``features()``
-function is used to further constrain *which* features must or must not be active:
+The DSL ``features()`` function constrains *which* features must or must not be active:
 
 .. code-block:: yaml
 
    requires:
      admin:
        optional: false
-       features: ["admin"]   # declares the feature universe; generates integrated => feature_admin
+       features: ["admin"]
    constraints:
      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}  # pins to exactly this feature set
 
@@ -308,7 +333,7 @@ The two mechanisms have distinct roles:
    * - Mechanism
      - Role
    * - ``features: [...]`` on endpoint
-     - Declares feature universe; enables boolean encoding; generates ``integrated => feature_x``
+     - Declares the feature universe and enables boolean encoding
    * - ``features(endpoint[x]) == {...}`` in DSL
      - Restricts which features may be active; prevents undeclared combinations
 

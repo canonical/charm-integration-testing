@@ -1,0 +1,164 @@
+---
+name: Setup Remote Cloud
+description: Prepare access to an existing cloud.
+inputs:
+  cloud-name:
+    description: Juju cloud name.
+    required: true
+  service:
+    description: Remote cloud service selected by environment lookup (k8s, o7k or
+      lxd).
+    required: true
+  kubeconfig-secret:
+    description: Name of the Kubernetes credentials secret.
+    required: false
+    default: ''
+  novarc-secret:
+    description: Name of the OpenStack credentials secret.
+    required: false
+    default: ''
+  lxd-secret:
+    description: Name of the remote LXD credentials secret.
+    required: false
+    default: ''
+  s3-secret-name:
+    description: Name of the remote S3 configuration secret.
+    required: false
+    default: ''
+  features:
+    description: JSON list of requested services.
+    required: false
+    default: '[]'
+outputs:
+  kubeconfig_path:
+    description: Path to the Kubernetes kubeconfig.
+    value: ${{ steps.result.outputs.kubeconfig_path }}
+  cloud-definition-path:
+    description: Path to the Juju cloud definition.
+    value: ${{ steps.result.outputs.cloud-definition-path }}
+  credentials-path:
+    description: Path to Juju credentials.
+    value: ${{ steps.result.outputs.credentials-path }}
+  metadata-source:
+    description: Path to OpenStack image metadata.
+    value: ${{ steps.result.outputs.metadata-source }}
+  s3-config-path:
+    description: Path to the S3 configuration, if requested.
+    value: ${{ steps.s3.outputs.s3-config-path }}
+runs:
+  using: composite
+  steps:
+    - name: Check remote credentials
+      id: credentials
+      shell: bash
+      env:
+        KUBECONFIG_CONTENT: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.kubeconfig-secret)] }}
+        NOVARC: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.novarc-secret)] }}
+        LXD_CREDENTIALS: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.lxd-secret)] }}
+        CLOUD_NAME: ${{ inputs.cloud-name }}
+        SERVICE: ${{ inputs.service }}
+      run: |
+        case "${SERVICE}" in
+          k8s) credentials="${KUBECONFIG_CONTENT}" ;;
+          o7k) credentials="${NOVARC}" ;;
+          lxd) credentials="${LXD_CREDENTIALS}" ;;
+          *)
+            echo "::error::Unsupported remote cloud service '${SERVICE}'." >&2
+            exit 1
+            ;;
+        esac
+        record="${RUNNER_TEMP}/juju-clouds/${CLOUD_NAME}.${SERVICE}.outputs"
+        if [[ -f "${record}" ]]; then
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        elif [[ -z "${credentials}" ]]; then
+          echo "::error::Missing credentials for Juju cloud '${CLOUD_NAME}'." >&2
+          exit 1
+        fi
+        echo "record=${record}" >> "$GITHUB_OUTPUT"
+    - name: Create cloud workspace
+      id: workspace
+      if: ${{ steps.credentials.outputs.found != 'true' }}
+      shell: bash
+      run: |
+        workspace="$(mktemp -d "${RUNNER_TEMP}/juju-cloud.XXXXXX")"
+        echo "path=${workspace}" >> "$GITHUB_OUTPUT"
+    - name: Setup Kubernetes
+      id: k8s
+      # TODO: When the scheduler supplies per-role features, pass them here and
+      # replace the credential-field condition with (see https://github.com/canonical/test-scheduler/pull/169):
+      # if: ${{ contains(fromJSON(inputs.features), 'k8s-api') }}
+      if: ${{ steps.credentials.outputs.found != 'true' && inputs.service == 'k8s' }}
+      uses: ./.github/actions/setup-environment/setup-k8s
+      with:
+        kubeconfig: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.kubeconfig-secret)] }}
+        cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ steps.workspace.outputs.path }}
+    - name: Setup OpenStack
+      id: o7k
+      # TODO: if: ${{ contains(fromJSON(inputs.features), 'o7k-api') }} (see https://github.com/canonical/test-scheduler/pull/169)
+      if: ${{ steps.credentials.outputs.found != 'true' && inputs.service == 'o7k' }}
+      uses: ./.github/actions/setup-environment/setup-openstack
+      with:
+        novarc: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.novarc-secret)] }}
+        cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ steps.workspace.outputs.path }}
+    - name: Setup LXD
+      id: lxd
+      # TODO: if: ${{ contains(fromJSON(inputs.features), 'lxd-api') }} (see https://github.com/canonical/test-scheduler/pull/169)
+      if: ${{ steps.credentials.outputs.found != 'true' && inputs.service == 'lxd' }}
+      uses: ./.github/actions/setup-environment/setup-lxd
+      with:
+        lxd-creds: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.lxd-secret)] }}
+        cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ steps.workspace.outputs.path }}
+    - name: Record cloud configuration
+      id: result
+      shell: bash
+      env:
+        FOUND: ${{ steps.credentials.outputs.found }}
+        RECORD: ${{ steps.credentials.outputs.record }}
+        KUBECONFIG_PATH: ${{ steps.k8s.outputs.kubeconfig_path }}
+        CLOUD_DEFINITION_PATH: ${{ steps.o7k.outputs.cloud-definition-path || steps.lxd.outputs.cloud-definition-path }}
+        CLOUD_CREDENTIALS_PATH: ${{ steps.o7k.outputs.credentials-path || steps.lxd.outputs.credentials-path }}
+        METADATA_SOURCE: ${{ steps.o7k.outputs.metadata-source }}
+      run: |
+        if [[ "${FOUND}" != "true" ]]; then
+          mkdir -p "$(dirname "${RECORD}")"
+          temporary="$(mktemp "${RECORD}.XXXXXX")"
+          trap 'rm -f "${temporary}"' EXIT
+          {
+            echo "kubeconfig_path=${KUBECONFIG_PATH}"
+            echo "cloud-definition-path=${CLOUD_DEFINITION_PATH}"
+            echo "credentials-path=${CLOUD_CREDENTIALS_PATH}"
+            echo "metadata-source=${METADATA_SOURCE}"
+          } > "${temporary}"
+          mv "${temporary}" "${RECORD}"
+        fi
+        cat "${RECORD}" >> "$GITHUB_OUTPUT"
+    - name: Write S3 configuration
+      id: s3
+      if: ${{ contains(fromJSON(inputs.features), 's3-api') }}
+      shell: bash
+      env:
+        S3_CONFIG: ${{ env[format('SETUP_CLOUD_SECRET_{0}', inputs.s3-secret-name)] }}
+        CLOUD_NAME: ${{ inputs.cloud-name }}
+      run: |-
+        if [[ -z "${S3_CONFIG}" ]]; then
+          echo "::error::Missing requested S3 configuration for '${CLOUD_NAME}'."
+          exit 1
+        fi
+        umask 077
+        mkdir -p "${RUNNER_TEMP}/juju-clouds"
+        path="${RUNNER_TEMP}/juju-clouds/${CLOUD_NAME}.s3.conf"
+        if [[ -f "${path}" ]]; then
+          if ! printf '%s' "${S3_CONFIG}" | cmp -s - "${path}"; then
+            echo "::error::Conflicting S3 configuration for shared cloud '${CLOUD_NAME}'."
+            exit 1
+          fi
+        else
+          temporary="$(mktemp "${path}.XXXXXX")"
+          trap 'rm -f "${temporary}"' EXIT
+          printf '%s' "${S3_CONFIG}" > "${temporary}"
+          mv "${temporary}" "${path}"
+        fi
+        echo "s3-config-path=${path}" >> "$GITHUB_OUTPUT"

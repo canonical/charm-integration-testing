@@ -1,6 +1,6 @@
 ---
 name: Get Environment Info
-description: Look up the platform, arch, cloud-type and Juju config for a named GitHub
+description: Look up the platform, arch, setup-mode and Juju config for a named GitHub
   Actions environment.
 inputs:
   environment_name:
@@ -13,13 +13,24 @@ outputs:
   arch:
     description: Architecture string (e.g. amd64).
     value: ${{ steps.lookup.outputs.arch }}
-  cloud-type:
-    description: Cloud setup type (k8s, o7k, or lxd).
-    value: ${{ steps.lookup.outputs.cloud-type }}
-  credentials-secret:
-    description: Name of the GitHub Actions secret holding the cloud credentials (kubeconfig
-      for k8s, novarc for o7k, LXD credentials YAML for lxd).
-    value: ${{ steps.lookup.outputs.credentials-secret }}
+  setup-mode:
+    description: Cloud setup mode (remote or local).
+    value: ${{ steps.lookup.outputs.setup-mode }}
+  cloud-name:
+    description: Juju cloud name shared by every environment on the same cloud.
+    value: ${{ steps.lookup.outputs.cloud-name }}
+  remote-service:
+    description: Remote cloud service selected by the credential field.
+    value: ${{ steps.lookup.outputs.remote-service }}
+  kubeconfig-secret:
+    description: Name of the GitHub secret holding the Kubernetes kubeconfig.
+    value: ${{ steps.lookup.outputs.kubeconfig-secret }}
+  novarc-secret:
+    description: Name of the GitHub secret holding the OpenStack novarc.
+    value: ${{ steps.lookup.outputs.novarc-secret }}
+  lxd-secret:
+    description: Name of the GitHub secret holding remote LXD credentials.
+    value: ${{ steps.lookup.outputs.lxd-secret }}
   s3-secret-name:
     description: Optional name of the GitHub Actions secret holding the shared S3
       storage configuration for this environment.
@@ -38,11 +49,6 @@ outputs:
   remote-logging:
     description: Optional Loki base URL for controller-model remote logging.
     value: ${{ steps.lookup.outputs.remote-logging }}
-  metadata-source:
-    description: >
-      Path to the local directory containing Juju simplestreams image metadata.
-      Set for OpenStack (o7k) environments; empty for k8s environments.
-    value: ${{ steps.lookup.outputs.metadata-source }}
 runs:
   using: composite
   steps:
@@ -53,46 +59,21 @@ runs:
         ENVIRONMENT_NAME: ${{ inputs.environment_name }}
         WORKSPACE: ${{ github.workspace }}
       run: |-
-        table="${WORKSPACE}/static/environments.yaml"
-        platform=$(yq ".environments[\"${ENVIRONMENT_NAME}\"].platform" "${table}")
-        if [[ "${platform}" == "null" ]]; then
-          echo "::error::Unknown environment '${ENVIRONMENT_NAME}'. Add it to static/environments.yaml."
-          exit 1
-        fi
-        arch=$(yq ".environments[\"${ENVIRONMENT_NAME}\"].arch" "${table}")
-        cloud_type=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"cloud-type\"]" "${table}")
-        case "${cloud_type}" in
-          k8s) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}") ;;
-          o7k) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}") ;;
-          lxd) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"lxd-secret\"] // \"\"" "${table}") ;;
-          *)
-            echo "::error::Unsupported cloud type '${cloud_type}' for environment '${ENVIRONMENT_NAME}'."
-            exit 1
-            ;;
-        esac
-        remote_logging=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"remote-logging\"] // \"\"" "${table}")
-        s3_secret_name=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"s3-secret-name\"] // \"\"" "${table}")
-
-        # Write Juju config objects to per-environment temp files so that
-        # multiple calls (e.g. target + neighbor) don't overwrite each other.
-        safe_name="${ENVIRONMENT_NAME//[^a-zA-Z0-9_-]/-}"
-        bootstrap_config_file="${RUNNER_TEMP}/env-${safe_name}-bootstrap-config.json"
-        bootstrap_constraints_file="${RUNNER_TEMP}/env-${safe_name}-bootstrap-constraints.json"
-        model_config_file="${RUNNER_TEMP}/env-${safe_name}-model-config.json"
-        yq -o=json -I=0 ".environments[\"${ENVIRONMENT_NAME}\"][\"bootstrap-config\"] // {}" "${table}" > "${bootstrap_config_file}"
-        yq -o=json -I=0 ".environments[\"${ENVIRONMENT_NAME}\"][\"bootstrap-constraints\"] // {}" "${table}" > "${bootstrap_constraints_file}"
-        yq -o=json -I=0 ".environments[\"${ENVIRONMENT_NAME}\"][\"model-config\"] // {}" "${table}" > "${model_config_file}"
-        echo "platform=${platform}" >> "${GITHUB_OUTPUT}"
-        echo "arch=${arch}" >> "${GITHUB_OUTPUT}"
-        echo "cloud-type=${cloud_type}" >> "${GITHUB_OUTPUT}"
-        echo "credentials-secret=${credentials_secret}" >> "${GITHUB_OUTPUT}"
-        echo "s3-secret-name=${s3_secret_name}" >> "${GITHUB_OUTPUT}"
-        echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
-        echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
-        echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"
-        echo "remote-logging=${remote_logging}" >> "${GITHUB_OUTPUT}"
-        if [[ "${cloud_type}" == "o7k" ]]; then
-          echo "metadata-source=${HOME}/openstack/images" >> "${GITHUB_OUTPUT}"
-        else
-          echo "metadata-source=" >> "${GITHUB_OUTPUT}"
-        fi
+        environment=$(mise run get-environment-info)
+        config_dir=$(mktemp -d "${RUNNER_TEMP}/environment-info.XXXXXX")
+        for key in bootstrap-config bootstrap-constraints model-config; do
+          jq -c --arg key "${key}" '.[$key] // {}' <<< "${environment}" > "${config_dir}/${key}.json"
+          echo "${key}=${config_dir}/${key}.json" >> "${GITHUB_OUTPUT}"
+        done
+        jq -r '
+          "platform=\(.platform)",
+          "arch=\(.arch)",
+          "setup-mode=\(.["setup-mode"])",
+          "cloud-name=\(.cloud)",
+          "remote-service=\(.["remote-service"] // "")",
+          "kubeconfig-secret=\(.["kubeconfig-secret"] // "")",
+          "novarc-secret=\(.["novarc-secret"] // "")",
+          "lxd-secret=\(.["lxd-secret"] // "")",
+          "s3-secret-name=\(.["s3-secret-name"] // "")",
+          "remote-logging=\(.["remote-logging"] // "")"
+        ' <<< "${environment}" >> "${GITHUB_OUTPUT}"

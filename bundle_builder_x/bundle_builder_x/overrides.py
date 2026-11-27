@@ -38,6 +38,9 @@ class CharmOverridesCriteria(BaseModel):
 
 
 class CharmEndpointOverrides(BaseModel):
+    # Opt in only for endpoints known to be absent in some supported revisions.
+    if_present: bool = False
+    constraints: list[str] = Field(default_factory=list)
     optional: bool | None = None
     limit: int | None = None
     cyclic: bool | None = None
