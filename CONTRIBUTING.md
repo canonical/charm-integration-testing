@@ -129,6 +129,34 @@ For adding, editing and removing pages, use the `how-to`, `reference` and
 syntax, refer to
 [the documentation starter pack cheatsheet](https://github.com/canonical/sphinx-docs-starter-pack/blob/main/docs/reference/doc-cheat-sheet.rst).
 
+### Where documentation goes
+
+Write each fact once, in the place its audience reads. Documentation for humans
+is the source of truth; AI instructions link to it rather than restating it.
+
+| Location | Audience | Owns |
+|---|---|---|
+| `README.md` | Humans | Project overview, getting started, links to everything else |
+| `CONTRIBUTING.md` | Humans | Contribution process: setup, tooling, linting, tests, reviews, branches |
+| `docs/` | Humans | Product documentation and project policies, in Diátaxis sections |
+| `.github/copilot-instructions.md` | AI | Repository-wide rules loaded by every Copilot session and review |
+| `.github/instructions/*.instructions.md` | AI | Rules for files matching `applyTo`, such as Python or validators |
+| `.agents/skills/<name>/` | AI | On-demand procedures for one task, such as triage or filing an issue |
+| `.agents/skills/system.md` | AI | System prompt for `mise run agent` and the development sandbox |
+| GitHub issues | Both | Work and known problems; link to policies instead of defining them |
+
+When deciding where something belongs:
+
+- If a human contributor needs it, put it in `docs/` or `CONTRIBUTING.md`, and
+  link to it from AI instructions.
+- Put agent behavior in AI files: tool usage, guardrails, and step-by-step
+  procedures that people would not follow by hand.
+- Use path-scoped instructions for rules about how code is written, and skills
+  for tasks. Keep repository-wide instructions short; they cost every session.
+- Keep `SKILL.md` a short workflow. Put each scenario or long procedure in a
+  separate file in the skill directory and link it from `SKILL.md`.
+- List new skills in `.agents/skills/system.md`.
+
 ## Project Structure
 
 ### Test Suite ([charm_integration_testing/test_suite](charm_integration_testing/test_suite))

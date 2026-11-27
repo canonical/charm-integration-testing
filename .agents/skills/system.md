@@ -74,6 +74,9 @@ Use the matching skill for detailed procedures and commands:
   `file-as-agent`.
 - Review PR feedback: `review-pr`.
 
+When adding or changing documentation, instructions, or skills, follow
+[where documentation goes](../../CONTRIBUTING.md#where-documentation-goes).
+
 For any GitHub content filed or posted on the user's behalf, follow
 `file-as-agent` for identity and AI disclosure. For PR review comments and
 replies, use the footer wording in `review-pr`.

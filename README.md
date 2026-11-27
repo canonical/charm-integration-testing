@@ -59,4 +59,6 @@ Juju options like `--juju-cloud`, `--juju-controller`, and
 [`docs/how-to/run-and-debug-tests-locally.rst`](docs/how-to/run-and-debug-tests-locally.rst).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about the
-documentation setup.
+documentation setup, and
+[where documentation goes](CONTRIBUTING.md#where-documentation-goes) for
+which files are written for humans and which for AI agents.
