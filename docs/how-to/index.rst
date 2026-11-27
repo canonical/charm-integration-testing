@@ -9,4 +9,5 @@ running and debugging tests and charms.
 
    run-and-debug-tests-locally
    use-bundle-builder-x
+   set-up-local-clouds-in-ci
    issue-categories

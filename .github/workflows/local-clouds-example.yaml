@@ -1,0 +1,48 @@
+---
+# Sample for product teams; see docs/how-to/set-up-local-clouds-in-ci.rst.
+name: Local clouds example
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  local-clouds:
+    runs-on: ubuntu-24.04
+    env:
+      MISE_CEILING_PATHS: ${{ github.workspace }}
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}/cit
+    defaults:
+      run:
+        working-directory: cit
+    steps:
+      - name: Check out charm-integration-testing
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: canonical/charm-integration-testing
+          # When copying, replace with a commit SHA of charm-integration-testing.
+          ref: ${{ github.sha }}
+          path: cit
+          persist-credentials: false
+      - name: Read mise version
+        id: mise
+        run: echo "version=$(cat .mise-version)" >> "$GITHUB_OUTPUT"
+      - name: Install mise
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+        with:
+          version: ${{ steps.mise.outputs.version }}
+          working_directory: cit
+          install: false
+          cache: false
+      - name: Install tools
+        run: mise run setup -- --group integration local-k8s
+      - name: Set up Kubernetes
+        run: mise run setup-k8s
+      - name: Run charm tests
+        run: |-
+          KUBECONFIG_local_k8s="$HOME/.kube/config" VALIDATORS_PATH="$PWD/validators" \
+          mise run test:suite -- -k test_teardown --mermaid-output bundle.mmd \
+            --target-cloud local-k8s \
+            --target-charm postgresql-k8s --target-channel 14/stable \
+            --target-application target --target-endpoint database \
+            --neighbor-charm data-integrator \
+            --neighbor-application neighbor --neighbor-endpoint postgresql
