@@ -1,7 +1,12 @@
-# DRAFT proposal for SQT-1464. Environment, placement, architecture, Juju
-# version, S3 setup, and credentials are supplied outside this file.
+# DRAFT proposal for SQT-1464. Environment, architecture, Juju version, S3
+# setup, and credentials are supplied outside this file.
 
 version: 1
+
+# single-model: both applications share a model.
+# cross-model: separate models share a controller.
+# cross-controller: separate models use separate controllers.
+model_topology: single-model
 
 # The target charm and endpoint under test.
 target:
@@ -41,7 +46,8 @@ neighbor:
   #     data-integrator:
   #       charm: data-integrator
 
-# Without bundles, the suite builds them. With all required bundles, it starts
-# at --current-state no_controller and skips test_build_bundle. Partial bundles
-# and conflicts with target or neighbor are rejected. test_deploy determines
-# run-specific offer references using all bundles.
+# With no bundles and current state no_bundle, the suite builds them. With all
+# required bundles, the default starting state is no_controller; a compatible
+# later state can be supplied when resuming. Partial bundles, bundle conflicts,
+# and an explicit no_bundle state with supplied bundles are rejected.
+# test_deploy determines run-specific offer references using all bundles.
