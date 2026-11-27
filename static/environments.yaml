@@ -1,10 +1,12 @@
 ---
 environments:
+  # Slots sharing a cloud declare the same Juju cloud name.
   # PS6 PROD KUBERNETES
   ps6-sqa-prod_charm_qa_kubernetes-1: &ps6-sqa-prod_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
-    cloud-type: k8s
+    setup-mode: remote
+    cloud: ps6-sqa-prod-charm-qa-kubernetes
     kubeconfig-secret: PROD_SQA_KUBECONFIG
     s3-secret-name: S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES
     arch: amd64
@@ -26,7 +28,8 @@ environments:
   ps6-sqa-stg_charm_qa_kubernetes-1: &ps6-sqa-stg_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
-    cloud-type: k8s
+    setup-mode: remote
+    cloud: ps6-sqa-stg-charm-qa-kubernetes
     kubeconfig-secret: STG_SQA_KUBECONFIG
     s3-secret-name: S3_PS6_SQA_STG_CHARM_QA_KUBERNETES
     arch: amd64
@@ -44,7 +47,8 @@ environments:
   ps6-sqa-prod_charm_qa_openstack-1: &ps6-sqa-prod_charm_qa_openstack
     github-runner: ps7-private-endpoint-runners
     platform: machine
-    cloud-type: o7k
+    setup-mode: remote
+    cloud: ps6-sqa-prod-charm-qa-openstack
     novarc-secret: PROD_SQA_NOVARC
     s3-secret-name: S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK
     arch: amd64
@@ -53,7 +57,8 @@ environments:
   ps7-sqa-prod_charm_qa_kubernetes-1: &ps7-sqa-prod_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
-    cloud-type: k8s
+    setup-mode: remote
+    cloud: ps7-sqa-prod-charm-qa-kubernetes
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     kubeconfig-secret: PROD_PS7_KUBECONFIG
@@ -90,7 +95,8 @@ environments:
   ps7-sqa-prod_charm_qa_openstack-1: &ps7-sqa-prod_charm_qa_openstack
     github-runner: ps7-private-endpoint-runners
     platform: machine
-    cloud-type: o7k
+    setup-mode: remote
+    cloud: ps7-sqa-prod-charm-qa-openstack
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     novarc-secret: PROD_PS7_NOVARC
@@ -104,7 +110,8 @@ environments:
   ps7-sqa-prod_charm_qa_lxd-1: &ps7-sqa-prod_charm_qa_lxd
     github-runner: ps7-private-endpoint-runners
     platform: machine
-    cloud-type: lxd
+    setup-mode: remote
+    cloud: ps7-sqa-prod-charm-qa-lxd
     lxd-secret: PROD_PS7_LXD
     s3-secret-name: S3_PS7_SQA_PROD_CHARM_QA_LXD
     arch: amd64
@@ -122,3 +129,27 @@ environments:
   ps7-sqa-prod_charm_qa_lxd-8: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-9: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-10: *ps7-sqa-prod_charm_qa_lxd
+  # TODO: Replace these role-specific slot IDs when the scheduler can reserve
+  # one local runner and pass the required cloud API for each role. See https://github.com/canonical/test-scheduler/pull/169
+  # GitHub-hosted runner environments
+  github-runner-k8s: &github-runner-k8s
+    github-runner: github-hosted-local
+    platform: kubernetes
+    setup-mode: local
+    cloud: local-k8s
+    arch: amd64
+  github-runner-k8s-2: *github-runner-k8s
+  github-runner-k8s-3: *github-runner-k8s
+  github-runner-k8s-4: *github-runner-k8s
+  github-runner-k8s-5: *github-runner-k8s
+  github-runner-lxd: &github-runner-lxd
+    github-runner: github-hosted-local
+    platform: machine
+    setup-mode: local
+    # Juju's built-in name for the local LXD cloud.
+    cloud: localhost
+    arch: amd64
+  github-runner-lxd-2: *github-runner-lxd
+  github-runner-lxd-3: *github-runner-lxd
+  github-runner-lxd-4: *github-runner-lxd
+  github-runner-lxd-5: *github-runner-lxd
