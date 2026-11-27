@@ -68,6 +68,7 @@ Use the matching skill for detailed procedures and commands:
 
 - Reproduce or fix a live charm bug: `reproduce-charm-bug`, `fix-charm-bug`.
 - Recreate a Test Observer charm run: `run-charm-tests`.
+- Triage charm test failures and known-bad revisions: `triage-charm-tests`.
 - Test or develop an endpoint validator: `test-validator`, `develop-validator`.
 - Set up a test substrate: `setup-charm-tests`, `setup-k8s`, `setup-lxd`.
 - File an issue or PR: `file-issue`, `file-pr`, with shared rules in
