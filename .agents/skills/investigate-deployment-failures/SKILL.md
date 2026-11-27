@@ -161,12 +161,14 @@ triage's job.
    not a failed fix. A pass or non-reproduction alone is not a fix.
 
 7. **Report to Jira. STOP before posting** and show the drafts to the user.
-   Post one top-level comment per signature; post every later update
-   (attempts, fixes, PRs, rerun results) as a reply to that comment. Use the
+   Post one comment per signature. Record every later update (attempts,
+   fixes, PRs, rerun results) by editing that comment, not by adding a new
+   one: refresh the header fields (e.g. confirmed cause, status) and append an
+   update section at the end. Never delete earlier update sections. Use the
    templates below.
 
 8. **Pipeline verification (separate entry point,** e.g. "verify SQT-xxxx"),
-   after the fix merged. Resume by reading the ticket's comment threads.
+   after the fix merged. Resume by reading the ticket's signature comments.
    Request reruns of the representative executions only with
    `create_rerun_requests` (`test_execution_ids`), skipping executions whose
    `get_test_execution` shows `is_rerun_requested` (`get_rerun_requests` is
@@ -174,10 +176,10 @@ triage's job.
    the user and stop. When the
    reruns finish, check
    whether each rerun still matches its signature; getting past the original
-   error is success. STOP before posting: show the draft reply to the
-   signature's comment and post it only after the user approves.
+   error is success. STOP before posting: show the drafted edit to the
+   signature's comment and apply it only after the user approves.
 
-### Top-level comment template
+### Signature comment template
 
 ```markdown
 **Signature:** `test_deploy` | `failure:charm: <X>` | `failure:charm:<X>:status: <value>` | env: <optional>
@@ -190,12 +192,16 @@ triage's job.
 - Confirmed facts: <observations with evidence links>
 - Hypotheses: <unconfirmed explanations>
 - Not verified: <item> - <reason> - <follow-up link or explicit acceptance>
+
+**Updates**
 ```
 
-### Reply template
+### Update section template
+
+Append to the end of the signature comment, oldest first.
 
 ```markdown
-**Update:** attempt | fix | PR | rerun
+**Update <YYYY-MM-DD>:** attempt | fix | PR | rerun
 **Kind / checks:** <attempt kind and what it checks>
 **Inputs:** <execution, bundle source, CIT commit, charm revisions, Juju/K8s versions>
 **Differences from original:** <list or "none known">
