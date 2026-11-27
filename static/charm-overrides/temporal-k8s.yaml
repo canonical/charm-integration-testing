@@ -4,8 +4,14 @@
 listed: true
 # Remove after: https://github.com/canonical/temporal-k8s-operator/pull/117
 overrides:
-  # Published tracks share the versioned endpoint generation.
-  - requires:
+  # Stale 1.31/edge 24.04 build (r75) blocks on ingress without frontend-certificates;
+  # later revisions allow ingress without TLS.
+  # Remove after: https://github.com/canonical/temporal-k8s-operator/issues/230
+  - criteria:
+      - track: '1.31'
+        risk: edge
+        ubuntu_version: '24.04'
+    requires: &requires
       frontend-certificates:
         optional: true
         limit: 1
@@ -25,19 +31,30 @@ overrides:
       ui:
         optional: true
         features: [ui]
-    provides:
+    provides: &provides
       metrics-endpoint:
         interface: prometheus_scrape
         optional: true
       grafana-dashboard:
         interface: grafana_dashboard
         optional: true
-    configs:
+    configs: &configs
       num-history-shards: [1, 2, 4]
     constraints:
+      # ingress requires frontend-certificates (charm.py::_validate_ingress)
+      - bool(endpoint[ingress]) => bool(endpoint[frontend-certificates])
       # num-history-shards must be one of the specified values
-      - config[num-history-shards] in {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
+      - &num_history_shards config[num-history-shards] in {1, 2, 4, 8, 16, 32, 64,
+        128, 256, 512, 1024}
       # admin endpoint must negotiate exactly the admin feature
-      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
+      - &admin_feature bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
       # ui endpoint must negotiate exactly the ui feature
-      - bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}
+      - &ui_feature bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}
+  # Published tracks share the versioned endpoint generation.
+  - requires: *requires
+    provides: *provides
+    configs: *configs
+    constraints:
+      - *num_history_shards
+      - *admin_feature
+      - *ui_feature
