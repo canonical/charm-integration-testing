@@ -1,0 +1,35 @@
+# DRAFT proposal for SQT-1464. The spec describes test intent; environment,
+# existing resources, run state, and execution options are supplied separately.
+
+version: 1
+
+# Defaults to single-model when omitted.
+# single-model: the target and optional neighbor share a model.
+# cross-model: separate models share a controller.
+# cross-controller: separate models use separate controllers.
+# Both cross-model and cross-controller require a neighbor.
+model_topology: single-model
+
+# The target charm under test. The endpoint is required only with a neighbor.
+target:
+  charm: postgresql-k8s
+  application: postgresql
+  endpoint: database
+  channel: 14/stable
+  revision: 468
+  series: "22.04"
+  downgrade_revision: 450
+
+# Optional. Without a neighbor, neighbor-dependent tests are skipped.
+neighbor:
+  charm: data-integrator
+  application: data-integrator
+  endpoint: postgresql
+
+# Select tests by exact suite test name. Prerequisite transitions may be added.
+tests:
+  - test_scale_in_and_scale_out_charm
+  - test_remove_and_restore_integration
+
+# Pre-built bundles and existing controllers or models are state overrides, not
+# test intent. The state input format and resume behavior are not defined yet.
