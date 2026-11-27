@@ -20,7 +20,10 @@ It:
 2. Installs the Mise version from ``cit/.mise-version``.
 3. Trusts only ``cit/``, and sets ``MISE_CEILING_PATHS`` to the workspace so
    that a ``mise.toml`` in your own repository is not merged in.
-4. Installs Juju and the setup tools, then runs ``setup-k8s`` and ``setup-lxd``.
+4. Installs the tools, runs ``setup-k8s``, then runs the test suite against one
+   hard-coded charm pair. ``-k test_teardown`` runs the shortest test path that
+   includes a deployment: it builds the bundle, bootstraps, deploys, integrates and
+   tears down. Remove ``-k`` to run the full suite.
 
 Use ``--output "$GITHUB_OUTPUT"`` to expose the following values as step
 outputs:

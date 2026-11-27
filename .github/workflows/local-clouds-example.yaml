@@ -32,18 +32,16 @@ jobs:
           working_directory: cit
           install: false
           cache: false
-      - name: Install Juju and setup tools
-        run: mise run setup -- --group local-k8s local-lxd
+      - name: Install tools
+        run: mise run setup -- --group integration local-k8s
       - name: Set up Kubernetes
-        id: k8s
-        run: mise run setup-k8s -- --output "$GITHUB_OUTPUT"
-      - name: Set up LXD
-        id: lxd
-        run: mise run setup-lxd -- --output "$GITHUB_OUTPUT"
-      - name: Bootstrap controllers
-        env:
-          K8S_CLOUD: ${{ steps.k8s.outputs.cloud-name }}
-          LXD_CLOUD: ${{ steps.lxd.outputs.cloud-name }}
+        run: mise run setup-k8s
+      - name: Run charm tests
         run: |-
-          juju bootstrap "$K8S_CLOUD" k8s
-          juju bootstrap "$LXD_CLOUD" lxd
+          KUBECONFIG_local_k8s="$HOME/.kube/config" VALIDATORS_PATH="$PWD/validators" \
+          mise run test:suite -- -k test_teardown \
+            --target-cloud local-k8s \
+            --target-charm postgresql-k8s --target-channel 14/stable \
+            --target-application target --target-endpoint certificates \
+            --neighbor-charm self-signed-certificates \
+            --neighbor-application neighbor --neighbor-endpoint certificates
