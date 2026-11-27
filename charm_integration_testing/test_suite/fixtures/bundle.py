@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from bundle_builder_x import (
     AppSpec,
     BundleBuilder,
+    BundleBuildFailureDiagnostic,
     Charm,
     CharmChannel,
     CharmhubClient,
@@ -19,6 +20,7 @@ from bundle_builder_x import (
     ModelSpec,
     Solution,
     SpecFile,
+    UnsatisfiableBundleError,
 )
 from bundle_builder_x import (
     JujuVersion as BundleJujuVersion,
@@ -144,22 +146,22 @@ def target_resolved_charm(
     target_controller: str,
     model: str,
 ) -> Charm | None:
-    """Resolve the target from the synthesized solution or saved bundle selectors."""
-    if State(request.config.getoption("--current-state")) == State.NO_BUNDLE:
-        solution: Solution = request.getfixturevalue("bundle_solution")
-        model_key = f"{target_controller}/{model}"
-        for bundle in solution.bundles:
-            if bundle.model == model_key:
-                return bundle.applications[target_application].charm
-        pytest.fail(f"Generated solution has no bundle for model {model_key!r}.")
-
-    application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
-    channel = application.channel
-    client: CharmhubClient = request.getfixturevalue("charmhub_client")
-    arch: str = request.getfixturevalue("target_arch")
-    platform: str = request.getfixturevalue("target_platform")
-    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
+    """Resolve the target, returning None when expected release constraints cannot be met."""
     try:
+        if State(request.config.getoption("--current-state")) == State.NO_BUNDLE:
+            solution: Solution = request.getfixturevalue("bundle_solution")
+            model_key = f"{target_controller}/{model}"
+            for bundle in solution.bundles:
+                if bundle.model == model_key:
+                    return bundle.applications[target_application].charm
+            pytest.fail(f"Generated solution has no bundle for model {model_key!r}.")
+
+        application: _TargetCharmSelectors = request.getfixturevalue("target_bundle_charm_selectors")
+        channel = application.channel
+        client: CharmhubClient = request.getfixturevalue("charmhub_client")
+        arch: str = request.getfixturevalue("target_arch")
+        platform: str = request.getfixturevalue("target_platform")
+        juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
         return client.charm_from_store(
             charm_name=application.charm,
             ubuntu_arch=arch,
@@ -171,6 +173,10 @@ def target_resolved_charm(
             charm_revision=application.revision,
             ubuntu_version=application.base.removeprefix("ubuntu@") if application.base is not None else None,
         )
+    except UnsatisfiableBundleError as exc:
+        if any(isinstance(diagnostic, BundleBuildFailureDiagnostic) for diagnostic in exc.diagnostics):
+            raise
+        return None
     except CharmReleaseNotFoundException:
         return None
 
