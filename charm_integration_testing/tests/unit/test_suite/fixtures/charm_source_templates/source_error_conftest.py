@@ -1,9 +1,14 @@
 import logging
+import os
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
+from typing import NoReturn
 
 import pytest
 import requests
+from test_suite.fixtures.charm_source import target_charm_source
+
 from bundle_builder_x import (
     ApplicationReleaseDiagnostic,
     BundleBuildFailureDiagnostic,
@@ -11,37 +16,44 @@ from bundle_builder_x import (
     CharmReleaseNotFoundException,
     UncompletableBundleError,
 )
-from test_suite.fixtures.charm_source import target_charm_source
+
+__all__ = ["target_charm_source"]
+
+STAGE = os.environ["CHARM_SOURCE_ERROR_STAGE"]
+MESSAGE = os.environ["CHARM_SOURCE_ERROR_MESSAGE"]
 
 
 @pytest.fixture(scope="session")
-def logger():
+def logger() -> logging.Logger:
     return logging.getLogger("charmlint-resolution")
 
 
-@pytest.fixture(scope="session")
-def git_client():
-    class GitStub:
-        def checkout(self, *args):
-            raise RuntimeError("Checkout failed")
+class GitStub:
+    def checkout(self, *args: object) -> NoReturn:
+        raise RuntimeError("Checkout failed")
 
+
+@pytest.fixture(scope="session")
+def git_client() -> GitStub:
     return GitStub()
 
 
 @pytest.fixture(scope="session")
-def target_resolved_charm():
-    if stage == "resolution":
+def target_resolved_charm() -> SimpleNamespace:
+    if STAGE == "resolution":
         raise requests.HTTPError("Charmhub unavailable")
-    if stage == "invalid-bundle":
+    if STAGE == "invalid-bundle":
         raise ValueError("Invalid saved bundle")
-    if stage in ("solver-timeout", "optimization", "mixed-diagnostics"):
+    if STAGE in ("solver-timeout", "optimization", "mixed-diagnostics"):
         kind = (
             BundleBuildFailureKind.OPTIMIZATION_UNSATISFIABLE
-            if stage == "optimization"
+            if STAGE == "optimization"
             else BundleBuildFailureKind.SOLVER_TIMEOUT
         )
-        diagnostics = [BundleBuildFailureDiagnostic(kind=kind, detail=message)]
-        if stage == "mixed-diagnostics":
+        diagnostics: list[BundleBuildFailureDiagnostic | ApplicationReleaseDiagnostic] = [
+            BundleBuildFailureDiagnostic(kind=kind, detail=MESSAGE)
+        ]
+        if STAGE == "mixed-diagnostics":
             diagnostics.append(
                 ApplicationReleaseDiagnostic(
                     application="target",
@@ -55,15 +67,15 @@ def target_resolved_charm():
 
 
 class JujuStub:
-    def download_charm(self, name, revision, destination):
-        if stage == "download":
+    def download_charm(self, name: str, revision: int, destination: Path) -> None:
+        if STAGE == "download":
             raise CharmReleaseNotFoundException("Download failed")
         with zipfile.ZipFile(destination, "w") as archive:
             archive.writestr("metadata.yaml", "name: example\nsource: https://example.com/repo")
-            if stage == "checkout":
+            if STAGE == "checkout":
                 archive.writestr("version", "abcdef0")
 
 
 @pytest.fixture(scope="session")
-def juju_client():
+def juju_client() -> JujuStub:
     return JujuStub()

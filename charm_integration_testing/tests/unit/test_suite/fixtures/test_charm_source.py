@@ -375,6 +375,9 @@ def test_checkout_accepts_build_only_charmcraft(tmp_path: Path) -> None:
     module._verify_charm_root(tmp_path, "example")
 
 
+TEMPLATES = Path(__file__).parent / "charm_source_templates"
+
+
 @pytest.fixture
 def charmlint_pytester(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> pytest.Pytester:
     executable = pytester.path / "charmlint"
@@ -388,9 +391,7 @@ def charmlint_pytester(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatc
 
 def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pytester) -> None:
     # GIVEN an unresolved target represented by None and a separate bundle-build failure
-    charmlint_pytester.makeconftest(
-        (Path(__file__).parent / "charm_source_templates" / "unresolved.py.txt").read_text(encoding="utf-8")
-    )
+    charmlint_pytester.makeconftest((TEMPLATES / "unresolved_target_conftest.py").read_text(encoding="utf-8"))
     charmlint_pytester.makepyfile(
         test_bundle="""
         def test_build_bundle(bundle_solution):
@@ -423,12 +424,13 @@ def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pyt
         pytest.param("mixed-diagnostics", "Solver timed out", id="mixed-diagnostics"),
     ],
 )
-def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stage: str, message: str) -> None:
+def test_source_errors_remain_failures(
+    charmlint_pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, stage: str, message: str
+) -> None:
     # GIVEN a failure other than an expected target-resolution incompatibility
-    charmlint_pytester.makeconftest(
-        f"stage = {stage!r}\nmessage = {message!r}\n"
-        + (Path(__file__).parent / "charm_source_templates" / "source_errors.py.txt").read_text(encoding="utf-8")
-    )
+    monkeypatch.setenv("CHARM_SOURCE_ERROR_STAGE", stage)
+    monkeypatch.setenv("CHARM_SOURCE_ERROR_MESSAGE", message)
+    charmlint_pytester.makeconftest((TEMPLATES / "source_error_conftest.py").read_text(encoding="utf-8"))
 
     # WHEN acquiring the source through both real test cases
     result = charmlint_pytester.runpytest()
