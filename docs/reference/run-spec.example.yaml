@@ -1,14 +1,16 @@
-# DRAFT proposal for SQT-1464. Environment, architecture, Juju version, S3
-# setup, and credentials are supplied outside this file.
+# DRAFT proposal for SQT-1464. The spec describes test intent; environment,
+# existing resources, run state, and execution options are supplied separately.
 
 version: 1
 
-# single-model: both applications share a model.
+# Defaults to single-model when omitted.
+# single-model: the target and optional neighbor share a model.
 # cross-model: separate models share a controller.
 # cross-controller: separate models use separate controllers.
+# Both cross-model and cross-controller require a neighbor.
 model_topology: single-model
 
-# The target charm and endpoint under test.
+# The target charm under test. The endpoint is required only with a neighbor.
 target:
   charm: postgresql-k8s
   application: postgresql
@@ -17,37 +19,17 @@ target:
   revision: 468
   series: "22.04"
   downgrade_revision: 450
-  # Optional pre-built bundle-builder output, shown for a single-model run.
-  # Block scalars preserve multi-document bundles and their overlays.
-  # bundle: |
-  #   bundle: kubernetes
-  #   applications:
-  #     postgresql:
-  #       charm: postgresql-k8s
-  #       channel: 14/stable
-  #       revision: 468
-  #       base: ubuntu@22.04
-  #       scale: 1
-  #     data-integrator:
-  #       charm: data-integrator
-  #       scale: 1
-  #   relations:
-  #     - ["postgresql:database", "data-integrator:postgresql"]
 
-# The charm and endpoint integrated with the target.
+# Optional. Without a neighbor, neighbor-dependent tests are skipped.
 neighbor:
   charm: data-integrator
   application: data-integrator
   endpoint: postgresql
-  # For a cross-model run, provide separate target and neighbor model bundles
-  # instead of the single-model target example above.
-  # bundle: |
-  #   applications:
-  #     data-integrator:
-  #       charm: data-integrator
 
-# With no bundles and current state no_bundle, the suite builds them. With all
-# required bundles, the default starting state is no_controller; a compatible
-# later state can be supplied when resuming. Partial bundles, bundle conflicts,
-# and an explicit no_bundle state with supplied bundles are rejected.
-# test_deploy determines run-specific offer references using all bundles.
+# Select tests by exact suite test name. Prerequisite transitions may be added.
+tests:
+  - test_scale_in_and_scale_out_charm
+  - test_remove_and_restore_integration
+
+# Pre-built bundles and existing controllers or models are state overrides, not
+# test intent. The state input format and resume behavior are not defined yet.
