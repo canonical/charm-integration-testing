@@ -1,0 +1,54 @@
+---
+# Sample for product teams; see docs/how-to/set-up-local-clouds-in-ci.rst.
+name: Local clouds example
+on:
+  pull_request:
+    paths:
+      - .github/workflows/local-clouds-example.yaml
+      - mise-tasks/setup*
+      - static/substrates/*
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  local-clouds:
+    runs-on: ubuntu-24.04
+    env:
+      MISE_CEILING_PATHS: ${{ github.workspace }}
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}/cit
+    defaults:
+      run:
+        working-directory: cit
+    steps:
+      - name: Check out charm-integration-testing
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: canonical/charm-integration-testing
+          ref: ${{ github.sha }}  # Product teams: pin a commit SHA
+          path: cit
+          persist-credentials: false
+      - name: Read mise version
+        id: mise
+        run: echo "version=$(cat .mise-version)" >> "$GITHUB_OUTPUT"
+      - name: Install mise
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+        with:
+          version: ${{ steps.mise.outputs.version }}
+          working_directory: cit
+          install: false
+          cache: false
+      - name: Install Juju and setup tools
+        run: mise run setup -- --group local-k8s local-lxd
+      - name: Set up Kubernetes
+        id: k8s
+        run: mise run setup-k8s -- --output "$GITHUB_OUTPUT"
+      - name: Set up LXD
+        id: lxd
+        run: mise run setup-lxd -- --output "$GITHUB_OUTPUT"
+      - name: Bootstrap controllers
+        env:
+          K8S_CLOUD: ${{ steps.k8s.outputs.cloud-name }}
+          LXD_CLOUD: ${{ steps.lxd.outputs.cloud-name }}
+        run: |-
+          juju bootstrap "$K8S_CLOUD" k8s
+          juju bootstrap "$LXD_CLOUD" lxd
