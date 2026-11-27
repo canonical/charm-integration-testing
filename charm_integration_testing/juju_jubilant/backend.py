@@ -747,7 +747,13 @@ class JubilantBackend(JujuBackend):
         try:
             self.client.model(model).cli("remove-secret", name_or_id)
         except jubilant.CLIError as exc:
-            if f"ERROR secret {json.dumps(name_or_id)} not found" in exc.stderr.splitlines():
+            quoted = json.dumps(name_or_id)
+            not_found_messages = {
+                f"ERROR secret {quoted} not found",
+                # Juju 4 reports a missing label differently.
+                f"ERROR getting user secret for label {quoted}: secret with label {quoted} not found",
+            }
+            if not_found_messages.intersection(exc.stderr.splitlines()):
                 raise JujuSecretNotFoundError(exc.returncode, exc.cmd, exc.output, exc.stderr) from exc
             raise
 

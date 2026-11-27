@@ -1834,6 +1834,11 @@ class TestJubilantBackend:
             ("stderr", "expected_error"),
             [
                 ('ERROR secret "my-secret" not found\n', JujuSecretNotFoundError),
+                (
+                    'ERROR getting user secret for label "my-secret": secret with label "my-secret" not found\n',
+                    JujuSecretNotFoundError,
+                ),
+                ('ERROR getting user secret for label "my-secret": permission denied\n', jubilant.CLIError),
                 ('ERROR model "test-model" not found\n', jubilant.CLIError),
             ],
         )
