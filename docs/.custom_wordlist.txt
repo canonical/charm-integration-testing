@@ -44,6 +44,8 @@ yaml
 backend
 backends
 Charmcraft
+Charmlint
+charmlint
 kubectl
 mise
 toolchain

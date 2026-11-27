@@ -29,12 +29,142 @@ overrides:
     resource_tracking: &resource_tracking
       skip:
         - pvc
+    # pg_cron is omitted: config.yaml limits it to the postgres database.
+    configs:
+      plugin-address-standardizer-enable: [true, null]
+      plugin-address-standardizer-data-us-enable: [true, null]
+      plugin-audit-enable: [true, null]
+      plugin-bloom-enable: [true, null]
+      plugin-bool-plperl-enable: [true, null]
+      plugin-btree-gin-enable: [true, null]
+      plugin-btree-gist-enable: [true, null]
+      plugin-citext-enable: [true, null]
+      plugin-cube-enable: [true, null]
+      plugin-debversion-enable: [true, null]
+      plugin-dict-int-enable: [true, null]
+      plugin-dict-xsyn-enable: [true, null]
+      plugin-earthdistance-enable: [true, null]
+      plugin-fuzzystrmatch-enable: [true, null]
+      plugin-hll-enable: [true, null]
+      plugin-hstore-enable: [true, null]
+      plugin-hypopg-enable: [true, null]
+      plugin-icu-ext-enable: [true, null]
+      plugin-intarray-enable: [true, null]
+      plugin-ip4r-enable: [true, null]
+      plugin-isn-enable: [true, null]
+      plugin-jsonb-plperl-enable: [true, null]
+      plugin-lo-enable: [true, null]
+      plugin-ltree-enable: [true, null]
+      plugin-old-snapshot-enable: [true, null]
+      plugin-orafce-enable: [true, null]
+      plugin-pg-freespacemap-enable: [true, null]
+      plugin-pg-similarity-enable: [true, null]
+      plugin-pg-stat-statements-enable: [true, null]
+      plugin-pg-trgm-enable: [true, null]
+      plugin-pg-visibility-enable: [true, null]
+      plugin-pgrowlocks-enable: [true, null]
+      plugin-pgstattuple-enable: [true, null]
+      plugin-plperl-enable: [true, null]
+      plugin-plpython3u-enable: [true, null]
+      plugin-pltcl-enable: [true, null]
+      plugin-postgis-enable: [true, null]
+      plugin-postgis-raster-enable: [true, null]
+      plugin-postgis-tiger-geocoder-enable: [true, null]
+      plugin-postgis-topology-enable: [true, null]
+      plugin-prefix-enable: [true, null]
+      plugin-rdkit-enable: [true, null]
+      plugin-seg-enable: [true, null]
+      plugin-spi-enable: [true, null]
+      plugin-tablefunc-enable: [true, null]
+      plugin-tcn-enable: [true, null]
+      plugin-tds-fdw-enable: [true, null]
+      plugin-timescaledb-enable: [true, null]
+      plugin-tsm-system-rows-enable: [true, null]
+      plugin-tsm-system-time-enable: [true, null]
+      plugin-unaccent-enable: [true, null]
+      plugin-uuid-ossp-enable: [true, null]
+      plugin-vector-enable: [true, null]
     provides:
       database:
         limit: 1
         optional: true
-        features: [tls]
+        features: &database_features [tls, plugin_address_standardizer, plugin_address_standardizer_data_us,
+          plugin_pgaudit, plugin_bloom, plugin_bool_plperl, plugin_btree_gin, plugin_btree_gist,
+          plugin_citext, plugin_cube, plugin_debversion, plugin_dict_int, plugin_dict_xsyn,
+          plugin_earthdistance, plugin_fuzzystrmatch, plugin_hll, plugin_hstore, plugin_hypopg,
+          plugin_icu_ext, plugin_intarray, plugin_ip4r, plugin_isn, plugin_jsonb_plperl,
+          plugin_lo, plugin_ltree, plugin_old_snapshot, plugin_orafce, plugin_pg_freespacemap,
+          plugin_pg_similarity, plugin_pg_stat_statements, plugin_pg_trgm, plugin_pg_visibility,
+          plugin_pgrowlocks, plugin_pgstattuple, plugin_plperl, plugin_plpython3u,
+          plugin_pltcl, plugin_postgis, plugin_postgis_raster, plugin_postgis_tiger_geocoder,
+          plugin_postgis_topology, plugin_prefix, plugin_rdkit, plugin_seg, plugin_spi,
+          plugin_tablefunc, plugin_tcn, plugin_tds_fdw, plugin_timescaledb, plugin_tsm_system_rows,
+          plugin_tsm_system_time, plugin_unaccent, plugin_uuid-ossp, plugin_vector]
     constraints:
+      - '"plugin_address_standardizer" in features(endpoint[database]) => set(config[plugin-address-standardizer-enable])'
+      - '"plugin_address_standardizer_data_us" in features(endpoint[database]) =>
+        set(config[plugin-address-standardizer-data-us-enable])'
+      - '"plugin_pgaudit" in features(endpoint[database]) => set(config[plugin-audit-enable])'
+      - '"plugin_bloom" in features(endpoint[database]) => set(config[plugin-bloom-enable])'
+      - '"plugin_bool_plperl" in features(endpoint[database]) => set(config[plugin-bool-plperl-enable])'
+      - '"plugin_btree_gin" in features(endpoint[database]) => set(config[plugin-btree-gin-enable])'
+      - '"plugin_btree_gist" in features(endpoint[database]) => set(config[plugin-btree-gist-enable])'
+      - '"plugin_citext" in features(endpoint[database]) => set(config[plugin-citext-enable])'
+      - '"plugin_cube" in features(endpoint[database]) => set(config[plugin-cube-enable])'
+      - '"plugin_debversion" in features(endpoint[database]) => set(config[plugin-debversion-enable])'
+      - '"plugin_dict_int" in features(endpoint[database]) => set(config[plugin-dict-int-enable])'
+      - '"plugin_dict_xsyn" in features(endpoint[database]) => set(config[plugin-dict-xsyn-enable])'
+      - '"plugin_earthdistance" in features(endpoint[database]) => set(config[plugin-earthdistance-enable])'
+      - '"plugin_fuzzystrmatch" in features(endpoint[database]) => set(config[plugin-fuzzystrmatch-enable])'
+      - '"plugin_hll" in features(endpoint[database]) => set(config[plugin-hll-enable])'
+      - '"plugin_hstore" in features(endpoint[database]) => set(config[plugin-hstore-enable])'
+      - '"plugin_hypopg" in features(endpoint[database]) => set(config[plugin-hypopg-enable])'
+      - '"plugin_icu_ext" in features(endpoint[database]) => set(config[plugin-icu-ext-enable])'
+      - '"plugin_intarray" in features(endpoint[database]) => set(config[plugin-intarray-enable])'
+      - '"plugin_ip4r" in features(endpoint[database]) => set(config[plugin-ip4r-enable])'
+      - '"plugin_isn" in features(endpoint[database]) => set(config[plugin-isn-enable])'
+      - '"plugin_jsonb_plperl" in features(endpoint[database]) => set(config[plugin-jsonb-plperl-enable])'
+      - '"plugin_lo" in features(endpoint[database]) => set(config[plugin-lo-enable])'
+      - '"plugin_ltree" in features(endpoint[database]) => set(config[plugin-ltree-enable])'
+      - '"plugin_old_snapshot" in features(endpoint[database]) => set(config[plugin-old-snapshot-enable])'
+      - '"plugin_orafce" in features(endpoint[database]) => set(config[plugin-orafce-enable])'
+      - '"plugin_pg_freespacemap" in features(endpoint[database]) => set(config[plugin-pg-freespacemap-enable])'
+      - '"plugin_pg_similarity" in features(endpoint[database]) => set(config[plugin-pg-similarity-enable])'
+      - '"plugin_pg_stat_statements" in features(endpoint[database]) => set(config[plugin-pg-stat-statements-enable])'
+      - '"plugin_pg_trgm" in features(endpoint[database]) => set(config[plugin-pg-trgm-enable])'
+      - '"plugin_pg_visibility" in features(endpoint[database]) => set(config[plugin-pg-visibility-enable])'
+      - '"plugin_pgrowlocks" in features(endpoint[database]) => set(config[plugin-pgrowlocks-enable])'
+      - '"plugin_pgstattuple" in features(endpoint[database]) => set(config[plugin-pgstattuple-enable])'
+      - '"plugin_plperl" in features(endpoint[database]) => set(config[plugin-plperl-enable])'
+      - '"plugin_plpython3u" in features(endpoint[database]) => set(config[plugin-plpython3u-enable])'
+      - '"plugin_pltcl" in features(endpoint[database]) => set(config[plugin-pltcl-enable])'
+      - '"plugin_postgis" in features(endpoint[database]) => set(config[plugin-postgis-enable])'
+      - '"plugin_postgis_raster" in features(endpoint[database]) => set(config[plugin-postgis-raster-enable])'
+      - '"plugin_postgis_tiger_geocoder" in features(endpoint[database]) => set(config[plugin-postgis-tiger-geocoder-enable])'
+      - '"plugin_postgis_topology" in features(endpoint[database]) => set(config[plugin-postgis-topology-enable])'
+      - '"plugin_prefix" in features(endpoint[database]) => set(config[plugin-prefix-enable])'
+      - '"plugin_rdkit" in features(endpoint[database]) => set(config[plugin-rdkit-enable])'
+      - '"plugin_seg" in features(endpoint[database]) => set(config[plugin-seg-enable])'
+      - '"plugin_spi" in features(endpoint[database]) => set(config[plugin-spi-enable])'
+      - '"plugin_tablefunc" in features(endpoint[database]) => set(config[plugin-tablefunc-enable])'
+      - '"plugin_tcn" in features(endpoint[database]) => set(config[plugin-tcn-enable])'
+      - '"plugin_tds_fdw" in features(endpoint[database]) => set(config[plugin-tds-fdw-enable])'
+      - '"plugin_timescaledb" in features(endpoint[database]) => set(config[plugin-timescaledb-enable])'
+      - '"plugin_tsm_system_rows" in features(endpoint[database]) => set(config[plugin-tsm-system-rows-enable])'
+      - '"plugin_tsm_system_time" in features(endpoint[database]) => set(config[plugin-tsm-system-time-enable])'
+      - '"plugin_unaccent" in features(endpoint[database]) => set(config[plugin-unaccent-enable])'
+      - '"plugin_uuid-ossp" in features(endpoint[database]) => set(config[plugin-uuid-ossp-enable])'
+      - '"plugin_vector" in features(endpoint[database]) => set(config[plugin-vector-enable])'
+      # Prerequisites from REQUIRED_PLUGINS and PostgreSQL extension control files.
+      - 'set(config[plugin-address-standardizer-enable]) => set(config[plugin-postgis-enable])'
+      - 'set(config[plugin-address-standardizer-data-us-enable]) => set(config[plugin-postgis-enable])'
+      - 'set(config[plugin-bool-plperl-enable]) => set(config[plugin-plperl-enable])'
+      - 'set(config[plugin-earthdistance-enable]) => set(config[plugin-cube-enable])'
+      - 'set(config[plugin-jsonb-plperl-enable]) => set(config[plugin-plperl-enable])'
+      - 'set(config[plugin-postgis-raster-enable]) => set(config[plugin-postgis-enable])'
+      - 'set(config[plugin-postgis-tiger-geocoder-enable]) => set(config[plugin-postgis-enable])'
+      - 'set(config[plugin-postgis-tiger-geocoder-enable]) => set(config[plugin-fuzzystrmatch-enable])'
+      - 'set(config[plugin-postgis-topology-enable]) => set(config[plugin-postgis-enable])'
       # If database endpoint uses tls mode, client-certificates is required
       - '"tls" in features(endpoint[database]) => bool(endpoint[client-certificates])'
       # replication must be same track/risk
@@ -44,6 +174,60 @@ overrides:
     criteria:
       - track: '14'
     resource_tracking: *resource_tracking
+    configs:
+      plugin_address_standardizer_enable: [true, null]
+      plugin_address_standardizer_data_us_enable: [true, null]
+      plugin_audit_enable: [true, null]
+      plugin_bloom_enable: [true, null]
+      plugin_bool_plperl_enable: [true, null]
+      plugin_btree_gin_enable: [true, null]
+      plugin_btree_gist_enable: [true, null]
+      plugin_citext_enable: [true, null]
+      plugin_cube_enable: [true, null]
+      plugin_debversion_enable: [true, null]
+      plugin_dict_int_enable: [true, null]
+      plugin_dict_xsyn_enable: [true, null]
+      plugin_earthdistance_enable: [true, null]
+      plugin_fuzzystrmatch_enable: [true, null]
+      plugin_hll_enable: [true, null]
+      plugin_hstore_enable: [true, null]
+      plugin_hypopg_enable: [true, null]
+      plugin_icu_ext_enable: [true, null]
+      plugin_intarray_enable: [true, null]
+      plugin_ip4r_enable: [true, null]
+      plugin_isn_enable: [true, null]
+      plugin_jsonb_plperl_enable: [true, null]
+      plugin_lo_enable: [true, null]
+      plugin_ltree_enable: [true, null]
+      plugin_old_snapshot_enable: [true, null]
+      plugin_orafce_enable: [true, null]
+      plugin_pg_freespacemap_enable: [true, null]
+      plugin_pg_similarity_enable: [true, null]
+      plugin_pg_stat_statements_enable: [true, null]
+      plugin_pg_trgm_enable: [true, null]
+      plugin_pg_visibility_enable: [true, null]
+      plugin_pgrowlocks_enable: [true, null]
+      plugin_pgstattuple_enable: [true, null]
+      plugin_plperl_enable: [true, null]
+      plugin_plpython3u_enable: [true, null]
+      plugin_pltcl_enable: [true, null]
+      plugin_postgis_enable: [true, null]
+      plugin_postgis_raster_enable: [true, null]
+      plugin_postgis_tiger_geocoder_enable: [true, null]
+      plugin_postgis_topology_enable: [true, null]
+      plugin_prefix_enable: [true, null]
+      plugin_rdkit_enable: [true, null]
+      plugin_seg_enable: [true, null]
+      plugin_spi_enable: [true, null]
+      plugin_tablefunc_enable: [true, null]
+      plugin_tcn_enable: [true, null]
+      plugin_tds_fdw_enable: [true, null]
+      plugin_timescaledb_enable: [true, null]
+      plugin_tsm_system_rows_enable: [true, null]
+      plugin_tsm_system_time_enable: [true, null]
+      plugin_unaccent_enable: [true, null]
+      plugin_uuid_ossp_enable: [true, null]
+      plugin_vector_enable: [true, null]
     provides:
       metrics-endpoint:
         optional: true
@@ -52,7 +236,7 @@ overrides:
       database:
         limit: 1
         optional: true
-        features: [tls]
+        features: *database_features
       db:
         limit: 1
         optional: true
@@ -62,6 +246,70 @@ overrides:
         optional: true
         features: [tls]
     constraints:
+      - '"plugin_address_standardizer" in features(endpoint[database]) => set(config[plugin_address_standardizer_enable])'
+      - '"plugin_address_standardizer_data_us" in features(endpoint[database]) =>
+        set(config[plugin_address_standardizer_data_us_enable])'
+      - '"plugin_pgaudit" in features(endpoint[database]) => set(config[plugin_audit_enable])'
+      - '"plugin_bloom" in features(endpoint[database]) => set(config[plugin_bloom_enable])'
+      - '"plugin_bool_plperl" in features(endpoint[database]) => set(config[plugin_bool_plperl_enable])'
+      - '"plugin_btree_gin" in features(endpoint[database]) => set(config[plugin_btree_gin_enable])'
+      - '"plugin_btree_gist" in features(endpoint[database]) => set(config[plugin_btree_gist_enable])'
+      - '"plugin_citext" in features(endpoint[database]) => set(config[plugin_citext_enable])'
+      - '"plugin_cube" in features(endpoint[database]) => set(config[plugin_cube_enable])'
+      - '"plugin_debversion" in features(endpoint[database]) => set(config[plugin_debversion_enable])'
+      - '"plugin_dict_int" in features(endpoint[database]) => set(config[plugin_dict_int_enable])'
+      - '"plugin_dict_xsyn" in features(endpoint[database]) => set(config[plugin_dict_xsyn_enable])'
+      - '"plugin_earthdistance" in features(endpoint[database]) => set(config[plugin_earthdistance_enable])'
+      - '"plugin_fuzzystrmatch" in features(endpoint[database]) => set(config[plugin_fuzzystrmatch_enable])'
+      - '"plugin_hll" in features(endpoint[database]) => set(config[plugin_hll_enable])'
+      - '"plugin_hstore" in features(endpoint[database]) => set(config[plugin_hstore_enable])'
+      - '"plugin_hypopg" in features(endpoint[database]) => set(config[plugin_hypopg_enable])'
+      - '"plugin_icu_ext" in features(endpoint[database]) => set(config[plugin_icu_ext_enable])'
+      - '"plugin_intarray" in features(endpoint[database]) => set(config[plugin_intarray_enable])'
+      - '"plugin_ip4r" in features(endpoint[database]) => set(config[plugin_ip4r_enable])'
+      - '"plugin_isn" in features(endpoint[database]) => set(config[plugin_isn_enable])'
+      - '"plugin_jsonb_plperl" in features(endpoint[database]) => set(config[plugin_jsonb_plperl_enable])'
+      - '"plugin_lo" in features(endpoint[database]) => set(config[plugin_lo_enable])'
+      - '"plugin_ltree" in features(endpoint[database]) => set(config[plugin_ltree_enable])'
+      - '"plugin_old_snapshot" in features(endpoint[database]) => set(config[plugin_old_snapshot_enable])'
+      - '"plugin_orafce" in features(endpoint[database]) => set(config[plugin_orafce_enable])'
+      - '"plugin_pg_freespacemap" in features(endpoint[database]) => set(config[plugin_pg_freespacemap_enable])'
+      - '"plugin_pg_similarity" in features(endpoint[database]) => set(config[plugin_pg_similarity_enable])'
+      - '"plugin_pg_stat_statements" in features(endpoint[database]) => set(config[plugin_pg_stat_statements_enable])'
+      - '"plugin_pg_trgm" in features(endpoint[database]) => set(config[plugin_pg_trgm_enable])'
+      - '"plugin_pg_visibility" in features(endpoint[database]) => set(config[plugin_pg_visibility_enable])'
+      - '"plugin_pgrowlocks" in features(endpoint[database]) => set(config[plugin_pgrowlocks_enable])'
+      - '"plugin_pgstattuple" in features(endpoint[database]) => set(config[plugin_pgstattuple_enable])'
+      - '"plugin_plperl" in features(endpoint[database]) => set(config[plugin_plperl_enable])'
+      - '"plugin_plpython3u" in features(endpoint[database]) => set(config[plugin_plpython3u_enable])'
+      - '"plugin_pltcl" in features(endpoint[database]) => set(config[plugin_pltcl_enable])'
+      - '"plugin_postgis" in features(endpoint[database]) => set(config[plugin_postgis_enable])'
+      - '"plugin_postgis_raster" in features(endpoint[database]) => set(config[plugin_postgis_raster_enable])'
+      - '"plugin_postgis_tiger_geocoder" in features(endpoint[database]) => set(config[plugin_postgis_tiger_geocoder_enable])'
+      - '"plugin_postgis_topology" in features(endpoint[database]) => set(config[plugin_postgis_topology_enable])'
+      - '"plugin_prefix" in features(endpoint[database]) => set(config[plugin_prefix_enable])'
+      - '"plugin_rdkit" in features(endpoint[database]) => set(config[plugin_rdkit_enable])'
+      - '"plugin_seg" in features(endpoint[database]) => set(config[plugin_seg_enable])'
+      - '"plugin_spi" in features(endpoint[database]) => set(config[plugin_spi_enable])'
+      - '"plugin_tablefunc" in features(endpoint[database]) => set(config[plugin_tablefunc_enable])'
+      - '"plugin_tcn" in features(endpoint[database]) => set(config[plugin_tcn_enable])'
+      - '"plugin_tds_fdw" in features(endpoint[database]) => set(config[plugin_tds_fdw_enable])'
+      - '"plugin_timescaledb" in features(endpoint[database]) => set(config[plugin_timescaledb_enable])'
+      - '"plugin_tsm_system_rows" in features(endpoint[database]) => set(config[plugin_tsm_system_rows_enable])'
+      - '"plugin_tsm_system_time" in features(endpoint[database]) => set(config[plugin_tsm_system_time_enable])'
+      - '"plugin_unaccent" in features(endpoint[database]) => set(config[plugin_unaccent_enable])'
+      - '"plugin_uuid-ossp" in features(endpoint[database]) => set(config[plugin_uuid_ossp_enable])'
+      - '"plugin_vector" in features(endpoint[database]) => set(config[plugin_vector_enable])'
+      # Prerequisites from REQUIRED_PLUGINS and PostgreSQL extension control files.
+      - 'set(config[plugin_address_standardizer_enable]) => set(config[plugin_postgis_enable])'
+      - 'set(config[plugin_address_standardizer_data_us_enable]) => set(config[plugin_postgis_enable])'
+      - 'set(config[plugin_bool_plperl_enable]) => set(config[plugin_plperl_enable])'
+      - 'set(config[plugin_earthdistance_enable]) => set(config[plugin_cube_enable])'
+      - 'set(config[plugin_jsonb_plperl_enable]) => set(config[plugin_plperl_enable])'
+      - 'set(config[plugin_postgis_raster_enable]) => set(config[plugin_postgis_enable])'
+      - 'set(config[plugin_postgis_tiger_geocoder_enable]) => set(config[plugin_postgis_enable])'
+      - 'set(config[plugin_postgis_tiger_geocoder_enable]) => set(config[plugin_fuzzystrmatch_enable])'
+      - 'set(config[plugin_postgis_topology_enable]) => set(config[plugin_postgis_enable])'
       # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
       - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) <= 1
       # If database endpoint uses tls mode, certificates is required

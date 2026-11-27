@@ -8,7 +8,7 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from subprocess import CalledProcessError, run  # nosec
+from subprocess import CalledProcessError  # nosec B404
 from typing import Any, Callable, Iterator
 
 import pytest
@@ -54,6 +54,7 @@ from s3_storage import S3Provider, S3ProviderRegistry, S3ResourceRegistry
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
+from utils.git import GitClient
 from utils.juju_releases import (
     fetch_stable_juju_versions,
     select_upgrade_target,
@@ -67,7 +68,6 @@ from bundle_builder_x import (
     BundleBuilder,
     BundleDiagnostic,
     Charm,
-    CharmChannel,
     CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
@@ -96,6 +96,7 @@ from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STAT
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
+    "test_suite.fixtures.bundle",
     "test_suite.fixtures.charm_source",
     "test_suite.fixtures.controller_spec",
     "test_suite.fixtures.integration_spec",
@@ -622,7 +623,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_bundle(request: pytest.FixtureRequest) -> Path:
     """Path to the target model's bundle YAML. Defaults to ``generated-target-bundle.yaml``."""
     value = request.config.getoption("--target-bundle")
@@ -655,7 +656,7 @@ def neighbor_bundle(request: pytest.FixtureRequest, is_cmr_test: bool) -> Path |
     return ppath
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_application(request: pytest.FixtureRequest) -> str:
     """Name of the charm application under test, passed via ``--target-application``."""
     value = request.config.getoption("--target-application")
@@ -665,7 +666,7 @@ def target_application(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_endpoint(request: pytest.FixtureRequest) -> str:
     """Juju endpoint on the target application, passed via ``--target-endpoint``."""
     value = request.config.getoption("--target-endpoint")
@@ -675,7 +676,7 @@ def target_endpoint(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_application(request: pytest.FixtureRequest) -> str:
     """Name of the neighbor application, passed via ``--neighbor-application``."""
     value = request.config.getoption("--neighbor-application")
@@ -685,7 +686,7 @@ def neighbor_application(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
     """Juju endpoint on the neighbor application, passed via ``--neighbor-endpoint``."""
     value = request.config.getoption("--neighbor-endpoint")
@@ -715,7 +716,7 @@ def target_charm(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_charm(request: pytest.FixtureRequest) -> str:
     """Charmhub name of the neighbor charm, passed via ``--neighbor-charm``."""
     value = request.config.getoption("--neighbor-charm")
@@ -747,112 +748,54 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
     return None if value == "default" else int(value)
 
 
-@pytest.fixture(scope="session")
-def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
-    """Canonical charm metadata for the target revision the cycle refreshes back to.
-
-    When the caller pins ``--target-revision``/``--target-channel`` those are used; otherwise
-    ``charm_from_store`` falls back to the charm overrides defaults, so a "latest release" run
-    still resolves a concrete revision and base. The whole downgrade/upgrade cycle is skipped
-    when the target cannot be resolved on the requested series.
-    """
-    target_charm: str = request.getfixturevalue("target_charm")
-    target_channel: str | None = request.getfixturevalue("target_channel")
-    target_revision: int | None = request.getfixturevalue("target_revision")
-    target_series: str | None = request.getfixturevalue("target_series")
-    target_arch: str = request.getfixturevalue("target_arch")
-    target_platform: str = request.getfixturevalue("target_platform")
-    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
-    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
-    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
-
-    channel = CharmChannel.model_validate(target_channel) if target_channel else None
-    channel_track = channel.track or None if channel else None
-    channel_risk = channel.risk or None if channel else None
-    channel_branch = channel.branch or None if channel else None
-
-    try:
-        return charmhub_client.charm_from_store(
-            charm_name=target_charm,
-            ubuntu_arch=target_arch,
-            charm_track=channel_track,
-            charm_risk=channel_risk,
-            charm_branch=channel_branch,
-            charm_revision=target_revision,
-            ubuntu_version=target_series,
-            platform=target_platform,
-            juju_version=bundle_juju_version,
-        )
-    except BaseMismatchError:
-        # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
-        # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
-        pytest.skip(
-            f"Charm '{target_charm}' target does not support the requested base "
-            f"'{target_series or 'default'}'; the downgrade/upgrade refresh cycle is untestable."
-        )
-    except ReleaseUnavailableError as exc:
-        if (
-            target_revision is None
-            and target_channel is None
-            and target_series is not None
-            and exc.kind is ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND
-        ):
-            pytest.skip(
-                f"Charm '{target_charm}' has no release for the requested base '{target_series}'; "
-                "the downgrade/upgrade refresh cycle is untestable."
-            )
-        raise
-
-
 @pytest.fixture
-def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
+def target_downgrade_revision(request: pytest.FixtureRequest) -> int | None:
     """Revision to downgrade to for the charm under test.
 
     When ``--target-downgrade-revision`` is an explicit integer, that value is
     used. When the value is ``"default"``, Test Observer is queried for a
-    historical revision with a passing deploy for the target charm. Either way
+    historical revision with a passing deploy for the target charm. Either way,
     the selected revision is validated against the base the target is deployed
-    on, and the cycle is skipped when the two are incompatible.
+    on. Returns ``None`` when the refresh cycle cannot be run.
     """
-    target_charm: str = request.getfixturevalue("target_charm")
-    target_channel: str | None = request.getfixturevalue("target_channel")
+    target: Charm | None = request.getfixturevalue("target_resolved_charm_for_refresh")
+    if target is None:
+        return None
+    target_charm = target.name
     target_arch: str = request.getfixturevalue("target_arch")
-    target: Charm = request.getfixturevalue("target_resolved_charm")
+    target_platform: str = request.getfixturevalue("target_platform")
+    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
-    channel = CharmChannel.model_validate(target_channel) if target_channel else None
     target_base = target.ubuntu_version
-    resolved_channel = channel or target.channel
+    resolved_channel = target.channel
+    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
 
-    def supports_target_base(revision: int) -> bool:
+    def supports_target_environment(revision: int) -> bool:
         try:
             charmhub_client.charm_from_store(
                 charm_name=target_charm,
                 ubuntu_arch=target_arch,
+                platform=target_platform,
+                juju_version=bundle_juju_version,
                 charm_track=resolved_channel.track,
                 charm_risk=resolved_channel.risk,
                 charm_branch=resolved_channel.branch or None,
                 charm_revision=revision,
                 ubuntu_version=target_base,
             )
-        except BaseMismatchError:
+        except CharmReleaseNotFoundException:
             return False
         return True
 
     value = request.config.getoption("--target-downgrade-revision")
     if value != "default":
         previous_revision = int(value)
-        if not supports_target_base(previous_revision):
-            pytest.skip(
-                f"Charm '{target_charm}' revision {previous_revision} does not support base '{target_base}' "
-                "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
-            )
+        if not supports_target_environment(previous_revision):
+            return None
         return previous_revision
     if resolved_channel.branch:
-        pytest.skip(
-            f"Unable to select a historical revision for branched channel '{resolved_channel}': "
-            "Test Observer history is not branch-specific. Set --target-downgrade-revision explicitly."
-        )
+        return None
     test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     try:
         historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
@@ -862,18 +805,13 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
             track=resolved_channel.explicit_track,
         )
         for candidate_revision in historical_revisions:
-            if supports_target_base(candidate_revision):
+            if supports_target_environment(candidate_revision):
                 return candidate_revision
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
-    # No usable historical revision (e.g. all prior revisions predate a base change and are
-    # unreachable without --force-series). Skip rather than fail so the downgrade/upgrade
-    # cycle is reported as untestable instead of a test failure.
-    pytest.skip(
-        "Unable to find a historical revision with a passing test_deploy result "
-        f"for charm '{target_charm}' in channel '{resolved_channel}'."
-    )
+    # No usable historical revision, for example when all earlier releases use another base.
+    return None
 
 
 @pytest.fixture(scope="session")
@@ -1023,13 +961,13 @@ def istio_mesh_extension(
     return IstioMeshExtension(juju_backend, logger, charmhub_client)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def bundle_builder(charmhub_client: CharmhubClient, logger: logging.Logger) -> BundleBuilder:
     """Builder that resolves a ``SpecFile`` into deployable Juju bundles."""
     return BundleBuilder(charmhub_client=charmhub_client, logger=logger)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> str:
     """Platform for the neighbor model in CMR tests. Falls back to --target-platform."""
     value = request.config.getoption("--neighbor-platform")
@@ -1039,7 +977,7 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_arch(
     request: pytest.FixtureRequest,
     target_arch: str,
@@ -1398,7 +1336,6 @@ def _release_resolution_metadata(error: CharmReleaseNotFoundException, charm_nam
                     ReleaseUnavailableKind.CHANNEL_NOT_FOUND: ("architecture", "base", "channel"),
                     ReleaseUnavailableKind.TRACK_NOT_FOUND: ("architecture", "base", "track", "revision"),
                     ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND: ("architecture", "base"),
-                    ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE: ("architecture",),
                 }
                 for field in request_fields_by_kind[leaf.kind]:
                     add(field, getattr(request, field))
@@ -1582,46 +1519,62 @@ def record_juju_execution_metadata(
             execution_metadata("juju:version", str(juju_client.version(handle)))
 
 
+@pytest.fixture(scope="session")
+def git_client(logger: logging.Logger) -> GitClient | None:
+    try:
+        return GitClient(logger)
+    except FileNotFoundError:
+        return None
+
+
 @pytest.fixture
 def record_pipeline_version_execution_metadata(
     execution_metadata: Callable[[str, str | int], None],
     request: pytest.FixtureRequest,
+    git_client: GitClient | None,
 ) -> None:
+    if git_client is None:
+        warnings.warn("Git is not installed; pipeline version metadata is unavailable.", stacklevel=2)
+        return
     pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
+    repository_path = str(request.config.rootpath)
 
     # Get repository commit hash
-    repository_version_command = ["git", "--no-pager", "log", "-n", "1", "--pretty=format:%h"]
-    repository_result = run(repository_version_command, capture_output=True, text=True)  # nosec B603
+    repository_result = git_client.run(
+        "-C", repository_path, "--no-pager", "log", "-n", "1", "--pretty=format:%h", check=False
+    )
     if repository_result.returncode == 0:
         execution_metadata("pipeline:ref", repository_result.stdout.strip())
     else:
-        warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}")
+        warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}", stacklevel=2)
 
     # Get repository tag if it exists
-    repository_tag_command = ["git", "describe", "--tags", "--exact-match", repository_result.stdout.strip()]
-    repository_tag_result = run(repository_tag_command, capture_output=True, text=True)  # nosec B603
-    if repository_tag_result.returncode == 0:
-        execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
-    elif "no tag exactly matches" in repository_tag_result.stderr.lower():
-        warnings.warn("No tag exists in git repo pointing to this commit.")
-    else:
-        warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}")
-
+    if repository_result.returncode == 0:
+        repository_tag_result = git_client.run(
+            "-C", repository_path, "describe", "--tags", "--exact-match", repository_result.stdout.strip(), check=False
+        )
+        if repository_tag_result.returncode == 0:
+            execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
+        elif "no tag exactly matches" in repository_tag_result.stderr.lower():
+            warnings.warn("No tag exists in git repo pointing to this commit.", stacklevel=2)
+        else:
+            warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}", stacklevel=2)
     # Get pipeline workflow hash if file exists
     if pipeline_path.exists():
-        pipeline_version_command = [
-            "git",
+        pipeline_result = git_client.run(
+            "-C",
+            repository_path,
             "hash-object",
             "--",
             str(pipeline_path.resolve()),
-        ]
-        pipeline_result = run(pipeline_version_command, capture_output=True, text=True)  # nosec B603
+            check=False,
+        )
         if pipeline_result.returncode == 0:
             execution_metadata("pipeline:workflow_hash", pipeline_result.stdout.strip())
         else:
-            warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
+            warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}", stacklevel=2)
     else:
-        warnings.warn(f"Pipeline file not found: {pipeline_path}")
+        warnings.warn(f"Pipeline file not found: {pipeline_path}", stacklevel=2)
 
 
 @pytest.fixture

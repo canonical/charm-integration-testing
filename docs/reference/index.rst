@@ -10,6 +10,7 @@ Contents
    :maxdepth: 1
 
    execution-metadata
+   run-inputs
    charm-deployment-constraints
    constraint-dsl
    spec-file

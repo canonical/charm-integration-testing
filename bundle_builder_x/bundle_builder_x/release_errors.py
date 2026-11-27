@@ -16,7 +16,6 @@ class ReleaseUnavailableKind(str, Enum):
     CHANNEL_NOT_FOUND = "channel_not_found"
     TRACK_NOT_FOUND = "track_not_found"
     DEFAULT_RELEASE_NOT_FOUND = "default_release_not_found"
-    UNEXPECTED_STORE_RESPONSE = "unexpected_store_response"
 
 
 @dataclass(frozen=True)
@@ -48,6 +47,15 @@ class CharmReleaseNotFoundException(Exception):
             message = f"{message}: {legacy_message}"
         self.request = request
         super().__init__(message)
+
+
+class UnexpectedStoreResponseError(Exception):
+    """Charmhub returned an unexpected response while resolving a release."""
+
+    def __init__(self, *, request: ReleaseRequest, detail: str, error_code: str | None = None) -> None:
+        self.request = request
+        self.error_code = error_code
+        super().__init__(detail)
 
 
 class PlatformMismatchError(CharmReleaseNotFoundException):

@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
-from .bundle_builder import BundleBuilder, UncompletableBundleError
+from .bundle_builder import BundleBuilder, UncompletableBundleError, UnsatisfiableBundleError
 from .bundle_diagnostics import (
     ApplicationReleaseDiagnostic,
     BundleBuildFailureDiagnostic,
@@ -31,6 +31,7 @@ from .release_errors import (
     ReleaseRequest,
     ReleaseUnavailableError,
     ReleaseUnavailableKind,
+    UnexpectedStoreResponseError,
     leaf_release_errors,
 )
 from .snapstore_http import SnapVersionNotFoundException
@@ -81,5 +82,7 @@ __all__ = [
     "UnfulfilledEndpointDiagnostic",
     "UnresolvedApplicationDiagnostic",
     "UnresolvedIntegrationDiagnostic",
+    "UnsatisfiableBundleError",
+    "UnexpectedStoreResponseError",
     "leaf_release_errors",
 ]

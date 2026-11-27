@@ -6,6 +6,8 @@ Prioritize coding style and maintainability in Python changes.
 ## Development Workflow
 
 - Before implementing or reviewing repository changes, read this file and any matching files under `.github/instructions/`.
+- Keep GitHub Actions and workflow steps as thin wrappers around mise tasks. Put shared logic,
+  including input validation, in the mise tasks rather than duplicating it in GitHub Actions.
 - After making any significant code change (new functionality, bug fixes, refactors spanning more than a trivial edit), run the repository linter (`scripts/lint.sh`, or the specific `ruff`/`mypy` commands for the affected package) before considering the work done. Fix any issues the linter reports in the changed code.
 - When opening a pull request, follow the structure defined in `.github/pull_request_template.md` (Description, Resolved issues, Documentation, Tests) rather than an ad hoc format.
 
@@ -91,6 +93,10 @@ Apply them both when writing code and when reviewing it.
 - Before caching derived or state-dependent data, identify its authoritative source, required lifetime, and invalidation events. Prefer looking it up from the owning backend/client at the point of use when practical.
 - Do not maintain the same cache or derived mapping independently across fixtures, extensions, and callers. This spreads invalidation responsibility and makes it unclear which copy is authoritative; let the subsystem that owns the data own any necessary cache.
 - If caching is justified by measured cost or consistency requirements, keep it within the smallest operation that needs it, key it by stable resource identity, and make refresh or invalidation behavior explicit. Do not retain model-, controller-, cluster-, or application-derived values across topology changes such as migration or teardown without a clear refresh mechanism.
+
+### 11. Leave skip decisions to test cases
+- Test suite fixtures must not skip tests when an input or resource is unavailable. Return `None` instead, and let each test case check its required fixtures and call `pytest.skip` when appropriate.
+- Return `None` only for expected unavailability; unexpected errors must still surface as failures.
 
 ## Review Goal
 
