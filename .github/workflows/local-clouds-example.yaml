@@ -2,6 +2,7 @@
 # Sample for product teams; see docs/how-to/set-up-local-clouds-in-ci.rst.
 name: Local clouds example
 on:
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
