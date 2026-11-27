@@ -12,33 +12,35 @@ target:
   revision: 468
   series: "22.04"
   downgrade_revision: 450
+  # Optional pre-built bundle-builder output, shown for a single-model run.
+  # Block scalars preserve multi-document bundles and their overlays.
+  # bundle: |
+  #   bundle: kubernetes
+  #   applications:
+  #     postgresql:
+  #       charm: postgresql-k8s
+  #       channel: 14/stable
+  #       revision: 468
+  #       base: ubuntu@22.04
+  #       scale: 1
+  #     data-integrator:
+  #       charm: data-integrator
+  #       scale: 1
+  #   relations:
+  #     - ["postgresql:database", "data-integrator:postgresql"]
 
 # The charm and endpoint integrated with the target.
 neighbor:
   charm: data-integrator
   application: data-integrator
   endpoint: postgresql
+  # For a cross-model run, provide separate target and neighbor model bundles
+  # instead of the single-model target example above.
+  # bundle: |
+  #   applications:
+  #     data-integrator:
+  #       charm: data-integrator
 
-# Optional pre-built bundle-builder output. The target bundle contains both
-# applications for a single-model run; a cross-model run also needs a neighbor
-# bundle. Block scalars preserve multi-document bundles and their overlays.
-#
-# bundles:
-#   target: |
-#     bundle: kubernetes
-#     applications:
-#       postgresql:
-#         charm: postgresql-k8s
-#         channel: 14/stable
-#         revision: 468
-#         base: ubuntu@22.04
-#         scale: 1
-#       data-integrator:
-#         charm: data-integrator
-#         scale: 1
-#     relations:
-#       - ["postgresql:database", "data-integrator:postgresql"]
-#
 # Without bundles, the suite builds them. With all required bundles, it starts
 # at --current-state no_controller and skips test_build_bundle. Partial bundles
 # and conflicts with target or neighbor are rejected. test_deploy determines
