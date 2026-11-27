@@ -50,6 +50,20 @@ overrides:
       - &admin_feature bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
       # ui endpoint must negotiate exactly the ui feature
       - &ui_feature bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}
+  # 1.31/edge 26.04 adds temporal-external-host-info.
+  - criteria:
+      - track: '1.31'
+        risk: edge
+        ubuntu_version: '26.04'
+    requires: *requires
+    provides: *provides
+    configs: *configs
+    constraints:
+      # temporal-external-host-info requires ingress (charm.py::_external_host_info_status)
+      - bool(endpoint[temporal-external-host-info]) => bool(endpoint[ingress])
+      - *num_history_shards
+      - *admin_feature
+      - *ui_feature
   # Published tracks share the versioned endpoint generation.
   - requires: *requires
     provides: *provides
