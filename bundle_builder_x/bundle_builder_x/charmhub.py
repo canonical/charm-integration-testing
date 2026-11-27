@@ -39,6 +39,7 @@ from .release_errors import (
     ReleaseRequest,
     ReleaseUnavailableError,
     ReleaseUnavailableKind,
+    UnexpectedStoreResponseError,
 )
 from .timing import NullTimeline, Timeline
 
@@ -767,9 +768,12 @@ class CharmhubClient:
 
         # Extract bases from error response
         if refresh_info.error is None:
-            raise ReleaseUnavailableError(
-                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
-                request=ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch),
+            raise UnexpectedStoreResponseError(
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    channel=str(charm_channel) if charm_channel is not None else None,
+                ),
                 detail=f"Failed to find default bases for charm {charm_name}: no error returned",
             )
 
@@ -782,9 +786,12 @@ class CharmhubClient:
                 raise IncompleteCharmInfoException(f"No extra information for default bases of {charm_name}")
             bases = [release.base for release in refresh_info.error.extra.releases]
         else:
-            raise ReleaseUnavailableError(
-                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
-                request=ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch),
+            raise UnexpectedStoreResponseError(
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    channel=str(charm_channel) if charm_channel is not None else None,
+                ),
                 detail=(
                     f"Failed to find default bases for charm {charm_name}: "
                     f"unexpected error code {refresh_info.error.code}"

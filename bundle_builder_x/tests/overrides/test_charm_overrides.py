@@ -20,7 +20,7 @@ from bundle_builder_x.domain import Domain, DomainApplication, DomainModel, Mode
 from bundle_builder_x.dsl_lowering import DSLLoweringError, LoweringContext, lower
 from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
-from bundle_builder_x.release_errors import ReleaseUnavailableError, ReleaseUnavailableKind
+from bundle_builder_x.release_errors import ReleaseUnavailableError
 
 
 def test_charm_override_yaml_is_valid(
@@ -47,11 +47,7 @@ def test_charm_override_file_is_valid(
         )
     except UnparsableCharmException as exc:
         pytest.fail(str(exc))
-    except ReleaseUnavailableError as exc:
-        if exc.kind is ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE:
-            # A malformed/unexpected Charmhub response is a real failure, not evidence
-            # that this (channel, ubuntu_version) combination simply isn't published.
-            raise
+    except ReleaseUnavailableError:
         # A release can disappear between channel-map collection and refresh.
         pytest.skip(f"no release published for {charm_name} at {channel} / ubuntu {ubuntu_version}")
 
@@ -73,9 +69,7 @@ def test_charm_override_constraints_lower_against_charm_metadata(
         )
     except UnparsableCharmException:
         return  # already reported by test_charm_override_file_is_valid
-    except ReleaseUnavailableError as exc:
-        if exc.kind is ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE:
-            raise
+    except ReleaseUnavailableError:
         pytest.skip(f"no release published for {charm_name} at {channel} / ubuntu {ubuntu_version}")
         return
 
