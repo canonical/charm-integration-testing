@@ -100,26 +100,15 @@ on:
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
 jobs:
-  # NOTE: determine-runner and execute-charm-test were temporarily merged into a single
-  # job because only ps7 runners are in use, and running two jobs per workflow wastes a
-  # second runner slot for no benefit. To revert once more runner types are back in play,
-  # restore the separate `determine-runner` job (see git history) and change `runs-on`
-  # below back to `${{ fromJSON(needs.determine-runner.outputs.runner) }}` with
-  # `needs: determine-runner`, and change the `steps.pick.outputs.*` references
-  # throughout this job back to `needs.determine-runner.outputs.*`.
-  execute-charm-test:
-    name: Execute integration tests against the charms
-    # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
-    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
-    env:
-      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
-      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
-      UV_FILE: ${{ github.workspace }}/static/uv
-      UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
-      VALIDATORS_PATH: ${{ github.workspace }}/validators
-      TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
-      NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
-      BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
+  # TODO: Let the dispatcher resolve runner settings and pass them with the run plan,
+  # removing this job. See https://github.com/canonical/test-scheduler/pull/169
+  determine-runner:
+    name: Determine GitHub Actions runner to use for the environment
+    runs-on: ubuntu-24.04
+    outputs:
+      runner: ${{ steps.pick.outputs.runner-labels }}
+      debug-mode: ${{ steps.pick.outputs.debug-mode }}
+      pip-proxy: ${{ steps.pick.outputs.pip-proxy }}
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -131,6 +120,34 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
+      - name: Trigger rerun on Test Observer if failure
+        if: ${{ failure() && inputs.execution_id != '' && ((inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API != '') || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API != '')) }}
+        uses: ./.github/actions/test-observer/trigger-rerun
+        with:
+          test_observer_api: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || vars.STG_TEST_OBSERVER_API }}
+          test_observer_token: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || secrets.STG_TEST_OBSERVER_TOKEN }}
+          test_execution_id: ${{ inputs.execution_id }}
+  execute-charm-test:
+    name: Execute integration tests against the charms
+    needs: determine-runner
+    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    env:
+      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
+      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
+      UV_FILE: ${{ github.workspace }}/static/uv
+      UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
+      VALIDATORS_PATH: ${{ github.workspace }}/validators
+      TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
+      NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
+      BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
+      # TODO: Replace with per-role feature requests from the scheduler. See https://github.com/canonical/test-scheduler/pull/169
+      # Until then, S3 is requested for both roles and local setup provisions both APIs.
+      CLOUD_FEATURES: '["s3-api"]'
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
@@ -138,9 +155,9 @@ jobs:
           # Remove once 4/stable serves stable 4.1: https://github.com/canonical/charm-integration-testing/issues/1309
           juju-channel: ${{ inputs.juju_channel == '4/stable' && '4.1/edge' || inputs.juju_channel }}
         env:
-          HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
+          HTTPS_PROXY: ${{ needs.determine-runner.outputs.pip-proxy }}
       - name: Enable Debug Session
-        if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
@@ -151,25 +168,6 @@ jobs:
           ssh-import-id ${SSH_IDS} || true
           echo "Debug mode enabled. SSH connection details:"
           echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
-      - name: Create swap file
-        shell: bash
-        run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo swapon --show
-      - name: Get target environment info
-        id: target_env_info
-        uses: ./.github/actions/get-environment-info
-        with:
-          environment_name: ${{ inputs.target_environment }}
-      - name: Get neighbor environment info
-        id: neighbor_env_info
-        if: ${{ inputs.neighbor_environment != '' }}
-        uses: ./.github/actions/get-environment-info
-        with:
-          environment_name: ${{ inputs.neighbor_environment }}
       - name: Log job inputs
         shell: bash
         env:
@@ -244,87 +242,25 @@ jobs:
       - name: Ensure Juju home directory exists
         shell: bash
         run: mkdir -p $HOME/.local/share/juju
-      - name: Resolve Juju target cloud credentials
-        id: target_creds
-        shell: bash
-        env:
-          CREDENTIALS_SECRET_NAME: ${{ steps.target_env_info.outputs.credentials-secret }}
-          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
-          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
-          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
-          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
-          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
-        run: |
-          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
-            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Setup target S3 config
-        id: target_s3_config
-        shell: bash
-        env:
-          S3_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-secret-name }}
-          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
-        run: |
-          if [[ -z "${S3_SECRET_NAME}" ]]; then
-            exit 0
-          fi
-          umask 077
-          S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-target.XXXXXX")"
-          printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
-          echo "config-path=${S3_CONFIG_PATH}" >> "$GITHUB_OUTPUT"
-      - name: Resolve Juju neighbor cloud credentials
-        id: neighbor_creds
-        if: ${{ inputs.neighbor_environment != '' }}
-        shell: bash
-        env:
-          CREDENTIALS_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.credentials-secret }}
-          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
-          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
-          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
-          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
-          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
-        run: |
-          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
-            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Setup neighbor S3 config
-        id: neighbor_s3_config
-        if: ${{ inputs.neighbor_environment != '' }}
-        shell: bash
-        env:
-          S3_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-secret-name }}
-          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
-        run: |
-          if [[ -z "${S3_SECRET_NAME}" ]]; then
-            exit 0
-          fi
-          umask 077
-          S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-neighbor.XXXXXX")"
-          printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
-          echo "config-path=${S3_CONFIG_PATH}" >> "$GITHUB_OUTPUT"
       - name: Setup Target Cloud
         id: setup_target
         uses: ./.github/actions/setup-environment/setup-cloud
+        env: &cloud-secrets
+          SETUP_CLOUD_SECRET_PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          SETUP_CLOUD_SECRET_STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+          SETUP_CLOUD_SECRET_PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+          SETUP_CLOUD_SECRET_PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+          SETUP_CLOUD_SECRET_PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          SETUP_CLOUD_SECRET_PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
+          SETUP_CLOUD_SECRET_S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
+          SETUP_CLOUD_SECRET_S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
+          SETUP_CLOUD_SECRET_S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
+          SETUP_CLOUD_SECRET_S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
+          SETUP_CLOUD_SECRET_S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
+          SETUP_CLOUD_SECRET_S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
         with:
-          cloud-name: target-cloud
-          cloud-type: ${{ steps.target_env_info.outputs.cloud-type }}
-          cloud-credentials: ${{ steps.target_creds.outputs.cloud-credentials }}
+          environment: ${{ inputs.target_environment }}
+          features: ${{ env.CLOUD_FEATURES }}
       - name: Post 'setup_target_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -338,10 +274,10 @@ jobs:
         id: setup_neighbor
         if: ${{ inputs.neighbor_environment != '' }}
         uses: ./.github/actions/setup-environment/setup-cloud
+        env: *cloud-secrets
         with:
-          cloud-name: neighbor-cloud
-          cloud-type: ${{ steps.neighbor_env_info.outputs.cloud-type }}
-          cloud-credentials: ${{ steps.neighbor_creds.outputs.cloud-credentials }}
+          environment: ${{ inputs.neighbor_environment }}
+          features: ${{ env.CLOUD_FEATURES }}
       - name: Post 'setup_neighbor_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -352,13 +288,13 @@ jobs:
           event_name: setup_neighbor_failed
           detail: Setup of neighbor cloud failed.
       - name: Debug Setup
-        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
         run: sleep ${DEBUG_SLEEP_SECONDS}
       - name: Debug Setup
-        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
@@ -375,18 +311,8 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config-path }}
-          S3_CONFIG_neighbor_cloud: ${{ steps.neighbor_s3_config.outputs.config-path }}
-          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
-          KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
-          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
-          CLOUD_DEFINITION_neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_neighbor_cloud: ${{ steps.setup_neighbor.outputs.credentials-path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
-          neighbor_cloud: ${{ (inputs.same_controller && inputs.neighbor_environment
-            == inputs.target_environment) && steps.setup_target.outputs.cloud-name
-            || steps.setup_neighbor.outputs.cloud-name }}
+          neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-name }}
           same_controller: ${{ inputs.same_controller }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
@@ -396,21 +322,21 @@ jobs:
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          platform: ${{ steps.target_env_info.outputs.platform }}
+          platform: ${{ steps.setup_target.outputs.platform }}
           log_level: ${{ inputs.log_level }}
-          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
-          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
-          model_config: ${{ steps.target_env_info.outputs.model-config }}
+          bootstrap_config: ${{ steps.setup_target.outputs.bootstrap-config }}
+          bootstrap_constraints: ${{ steps.setup_target.outputs.bootstrap-constraints }}
+          model_config: ${{ steps.setup_target.outputs.model-config }}
           metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
-          neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
-          neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
-          neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
-          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
-          neighbor_remote_logging: ${{ steps.neighbor_env_info.outputs.remote-logging }}
+          neighbor_bootstrap_config: ${{ steps.setup_neighbor.outputs.bootstrap-config }}
+          neighbor_bootstrap_constraints: ${{ steps.setup_neighbor.outputs.bootstrap-constraints }}
+          neighbor_model_config: ${{ steps.setup_neighbor.outputs.model-config }}
+          target_remote_logging: ${{ steps.setup_target.outputs.remote-logging }}
+          neighbor_remote_logging: ${{ steps.setup_neighbor.outputs.remote-logging }}
           neighbor_metadata_source: ${{ steps.setup_neighbor.outputs.metadata-source }}
-          neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
-          target_arch: ${{ steps.target_env_info.outputs.arch }}
-          neighbor_arch: ${{ steps.neighbor_env_info.outputs.arch }}
+          neighbor_platform: ${{ steps.setup_neighbor.outputs.platform }}
+          target_arch: ${{ steps.setup_target.outputs.arch }}
+          neighbor_arch: ${{ steps.setup_neighbor.outputs.arch }}
           run_id: ${{ github.run_id }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
@@ -469,10 +395,6 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config-path }}
-          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
-          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
@@ -482,14 +404,14 @@ jobs:
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          platform: ${{ steps.target_env_info.outputs.platform }}
+          platform: ${{ steps.setup_target.outputs.platform }}
           log_level: ${{ inputs.log_level }}
-          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
-          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
-          model_config: ${{ steps.target_env_info.outputs.model-config }}
-          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
+          bootstrap_config: ${{ steps.setup_target.outputs.bootstrap-config }}
+          bootstrap_constraints: ${{ steps.setup_target.outputs.bootstrap-constraints }}
+          model_config: ${{ steps.setup_target.outputs.model-config }}
+          target_remote_logging: ${{ steps.setup_target.outputs.remote-logging }}
           metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
-          target_arch: ${{ steps.target_env_info.outputs.arch }}
+          target_arch: ${{ steps.setup_target.outputs.arch }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -584,7 +506,7 @@ jobs:
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
       - name: Post Logs To Swift
         id: post_logs_to_swift
-        if: ${{ !cancelled() && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && inputs.execution_id != '' && steps.setup_target.outputs.setup-mode == 'remote' }}
         uses: ./.github/actions/swift/upload
         with:
           job_uuid: ${{ inputs.test_observer_environment }}/${{ inputs.execution_id
@@ -598,8 +520,16 @@ jobs:
           SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME_PS7 }}
           SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME_PS7 }}
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME_PS7 }}
+      - name: Upload local runner logs
+        id: upload_local_logs
+        if: ${{ !cancelled() && steps.setup_target.outputs.setup-mode == 'local' && steps.collect_logs.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: charm-test-logs
+          path: ${{ steps.collect_logs.outputs.directory_path }}
+          if-no-files-found: error
       - name: Post 'log_collection_finished' event
-        if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && (steps.post_logs_to_swift.outcome == 'success' || steps.upload_local_logs.outcome == 'success') && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
@@ -608,13 +538,13 @@ jobs:
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
         run: sleep ${DEBUG_SLEEP_SECONDS}
       - name: Debug Post Log Collection
-        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}

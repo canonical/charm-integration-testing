@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -23,6 +24,10 @@ from bundle_builder_x.charmhub_http import (
     RefreshResponse,
     UnparsableCharmException,
 )
+from bundle_builder_x.constraints_dsl import parse_constraint
+from bundle_builder_x.domain import Domain, DomainApplication, DomainModel, ModelRef, add_charm_to_domain
+from bundle_builder_x.dsl_lowering import LoweringContext, lower
+from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
 from bundle_builder_x.release_errors import AssumesMismatchError, PlatformMismatchError
 from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
@@ -1137,6 +1142,62 @@ class TestCharmhubClient:
     # ---------------------------------------------------------------------------
 
     class TestGetCharmEndpoints:
+        @pytest.mark.parametrize("endpoint_type", ["requires", "provides"])
+        @pytest.mark.parametrize("present", [False, True])
+        def test_conditional_endpoint_override(self, endpoint_type: str, present: bool) -> None:
+            # GIVEN an explicitly conditional endpoint override and its constraint
+            constraint = 'bool(endpoint[legacy]) => features(endpoint[legacy]) == {"legacy"}'
+            client = _client(
+                {
+                    "overrides": [
+                        {
+                            endpoint_type: {
+                                "legacy": {
+                                    "if_present": True,
+                                    "optional": True,
+                                    "features": ["legacy"],
+                                    "constraints": [constraint],
+                                }
+                            }
+                        }
+                    ]
+                }
+            )
+            metadata = CharmMetadata.model_validate(
+                {endpoint_type: {"legacy": {"interface": "legacy"}}} if present else {}
+            )
+            # WHEN building the charm from the revision's metadata
+            charm = client._build_charm("mycharm", _CHANNEL, 1, _UBUNTU_VERSION, "amd64", metadata, _EMPTY_CONFIG)
+            # THEN both the endpoint settings and constraint apply only when present
+            if present:
+                assert charm.endpoints["legacy"].optional is True
+                assert charm.endpoints["legacy"].features == frozenset({"legacy"})
+                assert charm.constraints == [parse_constraint(constraint)]
+            else:
+                assert "legacy" not in charm.endpoints
+                assert charm.constraints == []
+
+        def test_conditional_override_does_not_hide_other_stale_endpoints(self) -> None:
+            client = _client(
+                {"overrides": [{"requires": {"legacy": {"if_present": True}, "typo": {"optional": True}}}]}
+            )
+            with pytest.raises(UnparsableCharmException, match="typo"):
+                client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
+
+        def test_conditional_requires_does_not_match_a_provider(self) -> None:
+            client = _client(
+                {
+                    "overrides": [
+                        {"requires": {"web": {"if_present": True, "features": ["legacy"], "constraints": ["false"]}}}
+                    ]
+                }
+            )
+            charm = client._build_charm(
+                "mycharm", _CHANNEL, 1, _UBUNTU_VERSION, "amd64", _METADATA_PROVIDES, _EMPTY_CONFIG
+            )
+            assert charm.endpoints["web"].features == frozenset()
+            assert charm.constraints == []
+
         def test_stale_requires_key_raises(self) -> None:
             # GIVEN an override declaring a requires endpoint absent from charm metadata
             client = _client({"overrides": [{"requires": {"logging": {"optional": True}}}]})
@@ -1418,3 +1479,77 @@ class TestCharmhubClient:
 
             # THEN the charm is still present
             assert "charm-a" in result
+
+
+class TestKfpUiLatestEdgeOverride:
+    """Preserve legacy ingress settings without requiring it in newer revisions."""
+
+    _OVERRIDES_DIR = Path(__file__).parents[3] / "static" / "charm-overrides"
+    # Endpoints of kfp-ui latest/edge r2988, which has no `ingress` relation.
+    _METADATA = CharmMetadata(
+        containers={"ml-pipeline-ui": {"resource": "ml-pipeline-ui"}},
+        provides={"provide-cmr-mesh": CharmMetadata.Endpoint(interface="cross_model_mesh")},
+        requires={
+            "dashboard-links": CharmMetadata.Endpoint(interface="kubeflow_dashboard_links"),
+            "istio-ingress-route": CharmMetadata.Endpoint(interface="istio_ingress_route"),
+            "kfp-api": CharmMetadata.Endpoint(interface="k8s-service"),
+            "logging": CharmMetadata.Endpoint(interface="loki_push_api", optional=True),
+            "object-storage": CharmMetadata.Endpoint(interface="object-storage", limit=1, optional=True),
+            "require-cmr-mesh": CharmMetadata.Endpoint(interface="cross_model_mesh"),
+            "s3-credentials": CharmMetadata.Endpoint(interface="s3", limit=1, optional=True),
+            "service-mesh": CharmMetadata.Endpoint(interface="service_mesh", limit=1),
+        },
+    )
+
+    @pytest.mark.parametrize("has_ingress", [True, False], ids=["with-ingress", "without-ingress"])
+    def test_repository_override_matches_metadata(self, has_ingress: bool) -> None:
+        # GIVEN latest/edge metadata with or without the legacy ingress endpoint
+        metadata = self._METADATA.model_copy(deep=True)
+        if has_ingress:
+            metadata.requires["ingress"] = CharmMetadata.Endpoint(interface="ingress")
+        overrides_client = OverridesClient(overrides=self._OVERRIDES_DIR)
+        response = _refresh_response_with_charm(
+            "kfp-ui",
+            revision=1,
+            metadata=metadata,
+            bases=[CharmhubBase(channel="24.04", architecture="amd64")],
+        )
+
+        class _StubClient(_NullHttpClient):
+            def refresh(self, action: RefreshAction) -> RefreshResponse:
+                return response
+
+        client = CharmhubClient(http_client=cast(CharmhubHttpClient, _StubClient()), overrides_client=overrides_client)
+
+        # WHEN resolving latest/edge using the repository override
+        charm = client.charm_from_store(
+            charm_name="kfp-ui",
+            ubuntu_arch="amd64",
+            charm_track="latest",
+            charm_risk="edge",
+            ubuntu_version="24.04",
+        )
+
+        # THEN legacy SDI ingress is optional when present and omitted otherwise.
+        if has_ingress:
+            assert charm.endpoints["ingress"].optional is True
+            assert charm.endpoints["ingress"].features == frozenset({"sdi-legacy"})
+            assert (
+                parse_constraint('bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}')
+                in charm.constraints
+            )
+        else:
+            assert "ingress" not in charm.endpoints
+        assert {"kfp-api", "object-storage", "s3-credentials"} <= set(charm.endpoints)
+        model_ref = ModelRef(name="default")
+        domain = Domain()
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform=charm.platforms[0],
+            juju_version=JujuVersion(major=3, minor=6, patch=0),
+            applications={"kfp-ui": DomainApplication(charm="kfp-ui")},
+        )
+        charm_id = add_charm_to_domain(charm, domain, model_ref)
+        assert charm.constraints
+        for expr in charm.constraints:
+            lower(expr, LoweringContext(charm_id=charm_id, domain_charm=domain.charms[charm_id], domain=domain))
