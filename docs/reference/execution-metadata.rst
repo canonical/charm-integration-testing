@@ -165,7 +165,7 @@ Failure Information
      - Partial
      - ``application:blocked:Init failed``
    * - ``failure:migration:status``
-     - The source controller's latest migration status (``juju show-model``) when a migrated model does not appear on the target controller. ``not reported by source controller`` when the source no longer serves the model.
+     - The source controller's latest migration status (``juju show-model``) when a model migration fails. ``not reported by source controller`` when the source no longer serves the model.
      - Yes
      - ``aborted, removing model from target controller: model data transfer failed, failed to migrate binaries: ...``
    * - ``failure:migration:cause``

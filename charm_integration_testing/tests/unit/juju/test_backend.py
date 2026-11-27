@@ -204,7 +204,7 @@ class TestWaitForModelMigration:
         assert exc_info.value.status == ABORTED_STATUS
         assert exc_info.value.cause == "model 75a43d9f-ccd9-4425-8c98-d768d2109e96 has been removed"
         assert isinstance(exc_info.value.__cause__, JujuWaitTimeoutError)
-        assert "src:m to controller dst" in str(exc_info.value)
+        assert "model m from controller src to dst failed" in str(exc_info.value)
 
     def test_raises_without_status_when_source_no_longer_serves_model(self) -> None:
         # GIVEN a source controller that no longer reports the model

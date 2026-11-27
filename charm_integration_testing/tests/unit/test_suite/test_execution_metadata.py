@@ -569,6 +569,6 @@ def test_record_charm_info_execution_metadata_raises_for_unknown_application() -
     ],
 )
 def test_migration_failure_metadata(status: str | None, expected: list[tuple[str, str]]) -> None:
-    error = JujuMigrationError(JujuModelHandle(controller="src", model="m"), "dst", status)
+    error = JujuMigrationError("m", "src", "dst", status)
 
     assert _migration_failure_metadata(error) == expected
