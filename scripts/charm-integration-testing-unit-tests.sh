@@ -9,7 +9,6 @@ cd "$(dirname "$0")/.."
 uv run --no-sync --all-packages -- pytest "./charm_integration_testing/tests/unit" \
     --cov=./charm_integration_testing/extensions \
     --cov=./charm_integration_testing/juju \
-    --cov=./charm_integration_testing/juju_cmd \
     --cov=./charm_integration_testing/juju_jubilant \
     --cov=./charm_integration_testing/serializeable_dataclass \
     --cov=./charm_integration_testing/test_suite \

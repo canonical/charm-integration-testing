@@ -33,9 +33,7 @@ client-level logging or lifecycle behavior; avoid pass-through wrappers without 
 
 **Extensions (`JujuExtension` subclasses)** are wired exclusively through `JujuClient`. They must never be invoked directly from a backend or from test code. Flag any direct extension call that bypasses `JujuClient`.
 
-**`JubilantBackend`** is the active implementation and inherits `JujuBackend` directly.
-`JujuCmdBackend` is deprecated; do not introduce dependencies on it or add new
-functionality there. Implement new or changed behaviour in `JubilantBackend`.
+**`JubilantBackend`** is the concrete implementation and inherits `JujuBackend` directly.
 
 `JubilantBackend` is also permitted to depend on other infrastructure (e.g. `KubernetesClient`) when Juju itself cannot fulfil the operation. This is an intentional escape hatch for gaps in the Juju API, but it belongs in `JubilantBackend`, not in the ABC.
 
@@ -61,7 +59,7 @@ functionality there. Implement new or changed behaviour in `JubilantBackend`.
 - Keep model responsibilities focused:
   - Transport/validation structures → Pydantic models.
   - Immutable domain-like structures → frozen dataclasses.
-- `@serializeable_dataclass` is deprecated alongside `JujuCmdBackend`. Do not use it in new code. Existing uses are expected to disappear as `JujuCmdBackend` is phased out.
+- `@serializeable_dataclass` is deprecated. Do not use it in new code.
 - Flag mutable defaults and recommend default factories.
 
 ## Test Style

@@ -41,7 +41,6 @@ module-name = [
     "chaos_client",
     "extensions",
     "juju",
-    "juju_cmd",
     "juju_jubilant",
     "kubernetes_client",
     "resource_registry",
