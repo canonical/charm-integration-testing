@@ -619,6 +619,12 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(
+            f"Waiting {self._waiting_timeout_log(timeout)} for model {model.uri} to exist before continuing."
+        )
+        self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
+
     def wait_for_model_migration(
         self, model_name: str, source_controller: str, target_controller: str, timeout: timedelta | None = None
     ) -> None:
