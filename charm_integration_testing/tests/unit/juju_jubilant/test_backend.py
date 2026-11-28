@@ -32,7 +32,6 @@ from juju import (
 )
 from juju.backend import JujuBackend, JujuSecretNotFoundError
 from juju.version import JujuVersion
-from juju_cmd import JujuCmdBackend
 from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
@@ -318,10 +317,6 @@ class TestIsK8sCloud:
 
         with pytest.raises(ValueError, match="Cloud 'missing' is not registered with controller"):
             backend.is_k8s_cloud_on_controller("missing", "target-controller")
-
-
-def test_juju_cmd_backend_does_not_require_cloud_detection() -> None:
-    assert "is_k8s_cloud" not in JujuCmdBackend.__abstractmethods__
 
 
 @dataclass
@@ -3939,7 +3934,6 @@ def test_client_delegates_without_adding_an_abstract_backend_requirement() -> No
     kube = FollowerRestartKubernetesStub()
     client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__))
     assert client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT) == "target/1"
-    assert "restart_follower" not in JujuCmdBackend.__abstractmethods__
     with pytest.raises(NotImplementedError, match="does not support"):
         JujuBackend.restart_follower(client.backend, FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
 

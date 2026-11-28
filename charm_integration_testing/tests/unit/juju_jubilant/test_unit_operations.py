@@ -7,7 +7,6 @@ from typing import Any, cast
 
 import pytest
 from juju import JujuModelHandle, JujuWaitState
-from juju_cmd import JujuCmdBackend
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
 from kubernetes_client import KubernetesClient
@@ -101,17 +100,6 @@ def test_application_leader_raises_when_no_leader_is_reported() -> None:
 
     with pytest.raises(RuntimeError, match="Expected one leader"):
         JubilantBackend(client=cast(JubilantClient, client)).application_leader(MODEL, "target")
-
-
-def test_unit_operations_do_not_add_abstract_requirements_to_legacy_backend() -> None:
-    assert not {
-        "application_leader",
-        "remove_unit",
-        "reboot_unit",
-        "wait_for_unit_removal",
-        "wait_for_unit_unavailable",
-        "wait_for_unit_available",
-    }.intersection(JujuCmdBackend.__abstractmethods__)
 
 
 def test_reboot_unit_uses_ssh_for_machine_models() -> None:
