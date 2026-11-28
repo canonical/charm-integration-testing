@@ -7,6 +7,8 @@ from datetime import timedelta
 
 import pytest
 from juju import (
+    JujuMigrationError,
+    JujuModelHandle,
     JujuPerformanceWarning,
     JujuStatusPerformanceWarning,
     JujuWaitState,
@@ -14,6 +16,14 @@ from juju import (
     warn_performance,
 )
 from pydantic.dataclasses import dataclass
+
+from ..extensions.shared import NullJujuBackend
+
+ABORTED_STATUS = (
+    "aborted, removing model from target controller: model data transfer failed, failed to migrate binaries: "
+    "cannot upload charms: cannot upload charm: Put https://10.0.0.1:17070/migrate/charms/x: "
+    "cannot upload charm: model 75a43d9f-ccd9-4425-8c98-d768d2109e96 has been removed"
+)
 
 
 class TestJujuWaitTimeoutError:
@@ -154,3 +164,55 @@ class TestWarnSlow:
             # THEN a warning is still issued
             assert len(w) == 1
             assert issubclass(w[0].category, JujuPerformanceWarning)
+
+
+class MigrationBackendStub(NullJujuBackend):
+    def __init__(self, target_appears: bool, source_status: str | None) -> None:
+        self.target_appears = target_appears
+        self.source_status = source_status
+        self.status_queries: list[JujuModelHandle] = []
+
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
+        if not self.target_appears:
+            raise JujuWaitTimeoutError()
+
+    def model_migration_status(self, model: JujuModelHandle) -> str | None:
+        self.status_queries.append(model)
+        return self.source_status
+
+
+class TestWaitForModelMigration:
+    def test_returns_without_querying_source_when_target_appears(self) -> None:
+        # GIVEN a model that appears on the target controller
+        backend = MigrationBackendStub(target_appears=True, source_status=ABORTED_STATUS)
+
+        # WHEN waiting for the migration
+        backend.wait_for_model_migration("m", "src", "dst", timeout=None)
+
+        # THEN the source controller is not queried
+        assert backend.status_queries == []
+
+    def test_raises_with_source_migration_status_on_timeout(self) -> None:
+        # GIVEN a migration the source controller reports as aborted
+        backend = MigrationBackendStub(target_appears=False, source_status=ABORTED_STATUS)
+
+        # WHEN / THEN waiting raises the source's status and innermost cause
+        with pytest.raises(JujuMigrationError) as exc_info:
+            backend.wait_for_model_migration("m", "src", "dst", timeout=None)
+
+        assert backend.status_queries == [JujuModelHandle(controller="src", model="m")]
+        assert exc_info.value.status == ABORTED_STATUS
+        assert exc_info.value.cause == "model 75a43d9f-ccd9-4425-8c98-d768d2109e96 has been removed"
+        assert isinstance(exc_info.value.__cause__, JujuWaitTimeoutError)
+        assert "model m from controller src to dst failed" in str(exc_info.value)
+
+    def test_raises_without_status_when_source_no_longer_serves_model(self) -> None:
+        # GIVEN a source controller that no longer reports the model
+        backend = MigrationBackendStub(target_appears=False, source_status=None)
+
+        # WHEN / THEN the error says the status was not reported
+        with pytest.raises(JujuMigrationError) as exc_info:
+            backend.wait_for_model_migration("m", "src", "dst", timeout=None)
+
+        assert exc_info.value.cause is None
+        assert "not reported by source controller" in str(exc_info.value)

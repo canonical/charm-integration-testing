@@ -262,6 +262,9 @@ class NullJujuBackend(JujuBackend):
     def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
+    def model_migration_status(self, model: JujuModelHandle) -> str | None:
+        raise NotImplementedError
+
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         raise NotImplementedError
 

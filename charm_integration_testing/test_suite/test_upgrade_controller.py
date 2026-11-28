@@ -112,8 +112,13 @@ def _upgrade_via_migration(
     juju_client.migrate_model(
         model_name=model, source_controller=source_controller, target_controller=target_controller
     )
+    juju_client.wait_for_model_migration(
+        model_name=model,
+        source_controller=source_controller,
+        target_controller=target_controller,
+        timeout=timedelta(minutes=15),
+    )
     new_model_ref = JujuModelHandle(controller=target_controller, model=model)
-    juju_client.wait_for_model_to_exist(model=new_model_ref, timeout=timedelta(minutes=15))
     juju_client.idle_for_period(model=new_model_ref, timeout=timedelta(minutes=15))
 
     # Upgrade model agents to match the new controller's version

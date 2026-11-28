@@ -683,6 +683,15 @@ class JubilantBackend(JujuBackend):
             elapsed = datetime.now() - iteration_start
             time.sleep(max(0, (delay - elapsed).total_seconds()))
 
+    def model_migration_status(self, model: JujuModelHandle) -> str | None:
+        try:
+            info = self.client.model(model).show_model()
+        except jubilant.CLIError as e:
+            if _is_transient_model_unavailability_error(e, model):
+                return None
+            raise
+        return info.status.migration or None
+
     def wait_for_application_revision(
         self,
         application: str,

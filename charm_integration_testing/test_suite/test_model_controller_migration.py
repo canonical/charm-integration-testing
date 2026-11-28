@@ -39,7 +39,12 @@ def test_model_controller_migration(
     )
 
     # Wait migration to start
-    juju_client.wait_for_model_to_exist(model=temp_model_ref, timeout=timedelta(minutes=15))
+    juju_client.wait_for_model_migration(
+        model_name=model,
+        source_controller=target_controller,
+        target_controller=temp_juju_controller,
+        timeout=timedelta(minutes=15),
+    )
 
     models_to_validate = [m for m in (temp_model_ref, neighbor_model_ref) if m is not None]
 
@@ -66,7 +71,12 @@ def test_model_controller_migration(
     )
 
     # Wait migration to start
-    juju_client.wait_for_model_to_exist(model=target_model_ref, timeout=timedelta(minutes=15))
+    juju_client.wait_for_model_migration(
+        model_name=model,
+        source_controller=temp_juju_controller,
+        target_controller=target_controller,
+        timeout=timedelta(minutes=15),
+    )
 
     models_to_validate_back = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
 

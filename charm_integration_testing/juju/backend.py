@@ -134,6 +134,40 @@ class JujuWaitTimeoutError(TimeoutError):
         return str(self)
 
 
+class JujuMigrationError(Exception):
+    """A model migration failed.
+
+    ``status`` is the source controller's latest migration status for the model, or None when the
+    source no longer reports it.
+    """
+
+    model: str
+    source_controller: str
+    target_controller: str
+    status: str | None
+
+    def __init__(self, model: str, source_controller: str, target_controller: str, status: str | None):
+        self.model = model
+        self.source_controller = source_controller
+        self.target_controller = target_controller
+        self.status = status
+
+    @property
+    def cause(self) -> str | None:
+        """The innermost error of the status; Juju joins nested errors with ': '."""
+        return self.status.rsplit(": ", 1)[-1] if self.status else None
+
+    def __str__(self) -> str:
+        status = self.status or "not reported by source controller"
+        return (
+            f"Migration of model {self.model} from controller {self.source_controller} to "
+            f"{self.target_controller} failed (migration status: {status})"
+        )
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
 @dataclass
 class JujuExecOutput:
     return_code: int
@@ -370,6 +404,25 @@ class JujuBackend(ABC):
     @abstractmethod
     def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    def model_migration_status(self, model: JujuModelHandle) -> str | None:
+        """Return the model's latest migration status, or None if the controller no longer serves it."""
+        raise NotImplementedError
+
+    def wait_for_model_migration(
+        self, model_name: str, source_controller: str, target_controller: str, timeout: timedelta | None
+    ) -> None:
+        """Wait for a migrated model to exist on the target controller.
+
+        Raises JujuMigrationError with the source controller's migration status if the model does not
+        appear, since an aborted migration leaves its reason only on the source.
+        """
+        try:
+            self.wait_for_model_to_exist(JujuModelHandle(controller=target_controller, model=model_name), timeout)
+        except JujuWaitTimeoutError as error:
+            status = self.model_migration_status(JujuModelHandle(controller=source_controller, model=model_name))
+            raise JujuMigrationError(model_name, source_controller, target_controller, status) from error
 
     @abstractmethod
     def application_charm(self, model: JujuModelHandle, application: str) -> str | None:

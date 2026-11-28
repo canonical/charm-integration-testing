@@ -35,6 +35,7 @@ from juju import (
     JujuClient,
     JujuConsumedOfferInfo,
     JujuIntegrationApplication,
+    JujuMigrationError,
     JujuValidationError,
     JujuVersion,
     JujuWaitTimeoutError,
@@ -1410,6 +1411,15 @@ def _bundle_diagnostic_metadata(diagnostic: BundleDiagnostic) -> list[tuple[str,
     return []
 
 
+def _migration_failure_metadata(error: JujuMigrationError) -> list[tuple[str, str]]:
+    if error.status is None:
+        return [("failure:migration:status", "not reported by source controller")]
+    return [
+        ("failure:migration:status", normalize_string(error.status)),
+        ("failure:migration:cause", normalize_string(error.cause)),
+    ]
+
+
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
@@ -1429,7 +1439,10 @@ def record_failure_execution_metadata(
     if failure_exception in request.node.stash:
         exc = request.node.stash[failure_exception]
 
-        if isinstance(exc, JujuWaitTimeoutError):
+        if isinstance(exc, JujuMigrationError):
+            for category, value in _migration_failure_metadata(exc):
+                execution_metadata(category, value)
+        elif isinstance(exc, JujuWaitTimeoutError):
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
                     continue

@@ -625,6 +625,15 @@ class JujuClient:
         )
         self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
 
+    def wait_for_model_migration(
+        self, model_name: str, source_controller: str, target_controller: str, timeout: timedelta | None = None
+    ) -> None:
+        self.logger.info(
+            f"Waiting {self._waiting_timeout_log(timeout)} for model '{model_name}' to migrate from controller "
+            f"'{source_controller}' to '{target_controller}'."
+        )
+        self.backend.wait_for_model_migration(model_name, source_controller, target_controller, timeout)
+
     def application_exists(self, application: str, model: JujuModelHandle) -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
         return application in self.backend.list_applications(model)
